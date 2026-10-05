@@ -28,7 +28,6 @@ from mailprocessor.config import (
     SourceConfig,
     load_app_config,
     load_parsing_rules,
-    resolve_relative_paths,
 )
 from mailprocessor.errors import (
     ImapLoginError,
@@ -39,6 +38,16 @@ from mailprocessor.errors import (
 )
 from mailprocessor.i18n import resolve_language, t
 from mailprocessor.logfile import attach_log_file, log_file_path
+from mailprocessor.parser import normalize_body
+from mailprocessor.preview import (
+    RulePreview,
+    SampleMail,
+    load_sample,
+    preview_rule,
+    result_text,
+    sample_files,
+    summary_text,
+)
 from mailprocessor.processor import RunSummary, run_pipeline, start_over
 from mailprocessor.rule_patterns import LABEL_TYPES, RULE_TYPES, RuleType
 
@@ -260,11 +269,15 @@ def friendly_error(exc: BaseException, lang: str) -> str:
     return t("error.unexpected", lang).format(name=type(exc).__name__)
 
 
+def setting_path(setting: str, config_dir: Path) -> Path:
+    """A path from the config; relative settings are relative to the config file, like in a run."""
+    path = Path(setting).expanduser()
+    return path if path.is_absolute() else (config_dir / path).resolve()
+
+
 def output_file_path(output_setting: str, config_dir: Path) -> Path:
-    """The Excel file a run writes to; relative settings are relative to the config file, like in a run."""
-    config = _default_config()
-    config.app.output_xlsx = output_setting or config.app.output_xlsx
-    return Path(resolve_relative_paths(config, config_dir).app.output_xlsx)
+    """The Excel file a run writes to."""
+    return setting_path(output_setting or _default_config().app.output_xlsx, config_dir)
 
 
 def open_in_default_app(path: Path) -> None:
@@ -323,7 +336,10 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
         root.iconphoto(True, app_icon)
     except (OSError, tk.TclError):
         pass  # a missing icon is cosmetic; never block the app
-    root.geometry("1060x760")
+    # Large enough for rules and sample mail side by side, but never larger than the screen.
+    width = min(1320, root.winfo_screenwidth() - 80)
+    height = min(880, root.winfo_screenheight() - 120)
+    root.geometry(f"{width}x{height}")
 
     container = ttk.Frame(root, padding=12)
     container.pack(fill=tk.BOTH, expand=True)
@@ -473,6 +489,7 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
         )
         if chosen:
             eml_folder_var.set(path_setting(Path(chosen), cfg_path.resolve().parent))
+            refresh_sample_files()
 
     eml_browse_button = ttk.Button(eml_frame, text=tr("button.browse"), command=choose_eml_folder)
     eml_browse_button.grid(row=0, column=2, sticky="w", padx=(8, 0), pady=(0, 6))
@@ -511,15 +528,31 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
 
     rules_file_label = ttk.Label(fields_tab, text=f"{tr('label.rules_file')}: {rules_file}")
     rules_file_label.pack(anchor="w")
-    view_columns = ("column", "type", "description", "required")
-    fields_view = ttk.Treeview(fields_tab, columns=view_columns, show="headings", height=10)
-    view_layout = (("column", 160, "w"), ("type", 190, "w"), ("description", 480, "w"), ("required", 70, "center"))
+    # Rules on the left, the sample mail they are tested against on the right.
+    fields_paned = ttk.PanedWindow(fields_tab, orient=tk.HORIZONTAL)
+    fields_paned.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+    rules_pane = ttk.Frame(fields_paned)
+    sample_pane = ttk.LabelFrame(fields_paned, text=tr("preview.title"), padding=8)
+    fields_paned.add(rules_pane, weight=3)
+    fields_paned.add(sample_pane, weight=2)
+
+    view_columns = ("column", "type", "description", "required", "result")
+    fields_view = ttk.Treeview(rules_pane, columns=view_columns, show="headings", height=8)
+    view_layout = (
+        ("column", 120, "w"),
+        ("type", 150, "w"),
+        ("description", 230, "w"),
+        ("required", 50, "center"),
+        ("result", 200, "w"),
+    )
     for name, width, anchor in view_layout:
         fields_view.column(name, width=width, anchor=anchor)
-    fields_view.pack(fill=tk.BOTH, expand=True, pady=(6, 8))
+    fields_view.tag_configure("missing_required", foreground="#b91c1c")
+    fields_view.tag_configure("missing_optional", foreground="gray")
+    fields_view.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
 
     # Editor: column, type and required on top; below only the inputs the chosen type needs.
-    editor = ttk.Frame(fields_tab)
+    editor = ttk.Frame(rules_pane)
     editor.pack(fill=tk.X, pady=(0, 8))
     field_column_var = tk.StringVar()
     field_labels_var = tk.StringVar()
@@ -531,7 +564,8 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
 
     field_column_label = ttk.Label(editor, text=tr("label.field_column"))
     field_column_label.grid(row=0, column=0, sticky="w", padx=(0, 8))
-    ttk.Entry(editor, textvariable=field_column_var, width=24).grid(row=0, column=1, sticky="w")
+    field_column_entry = ttk.Entry(editor, textvariable=field_column_var, width=22)
+    field_column_entry.grid(row=0, column=1, sticky="w")
     field_type_label = ttk.Label(editor, text=tr("label.field_type"))
     field_type_label.grid(row=0, column=2, sticky="w", padx=(16, 8))
     field_type_box = ttk.Combobox(editor, state="readonly", width=28)
@@ -550,8 +584,11 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
     end_entry = ttk.Entry(inputs, textvariable=field_end_var)
     pattern_label = ttk.Label(inputs, text=tr("label.field_pattern"))
     pattern_entry = ttk.Entry(inputs, textvariable=field_pattern_var)
-    rule_hint = ttk.Label(editor, foreground="gray", wraplength=900, justify=tk.LEFT)
+    rule_hint = ttk.Label(editor, foreground="gray", wraplength=620, justify=tk.LEFT)
     rule_hint.grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
+    # Live result of the rule being edited, in the sample mail.
+    editor_result = ttk.Label(editor, wraplength=620, justify=tk.LEFT)
+    editor_result.grid(row=3, column=0, columnspan=6, sticky="w", pady=(6, 0))
     as_regex_button = ttk.Button(editor, command=lambda: convert_to_regex())
     editor.columnconfigure(5, weight=1)
 
@@ -577,6 +614,7 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
             as_regex_button.grid_forget()
         else:
             as_regex_button.grid(row=2, column=5, sticky="e", pady=(4, 0))
+        schedule_preview()
 
     def set_field_type(rule_type: RuleType) -> None:
         field_type[0] = rule_type
@@ -586,6 +624,36 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
     def on_type_selected() -> None:
         field_type[0] = RULE_TYPES[field_type_box.current()]
         show_type_inputs()
+
+    sample_nav = ttk.Frame(sample_pane)
+    sample_nav.pack(fill=tk.X)
+    sample_prev_button = ttk.Button(sample_nav, text="◀", width=3, command=lambda: step_sample(-1))
+    sample_prev_button.pack(side=tk.LEFT)
+    sample_next_button = ttk.Button(sample_nav, text="▶", width=3, command=lambda: step_sample(1))
+    sample_next_button.pack(side=tk.LEFT, padx=(4, 0))
+    sample_title = ttk.Label(sample_nav)
+    sample_title.pack(side=tk.LEFT, padx=(8, 0), fill=tk.X, expand=True)
+    sample_actions = ttk.Frame(sample_pane)
+    sample_actions.pack(fill=tk.X, pady=(6, 6))
+    sample_load_button = ttk.Button(sample_actions, command=lambda: choose_sample_file())
+    sample_load_button.pack(side=tk.LEFT)
+    sample_paste_button = ttk.Button(sample_actions, command=lambda: paste_sample())
+    sample_paste_button.pack(side=tk.LEFT, padx=(8, 0))
+    sample_summary = ttk.Label(sample_pane, wraplength=420, justify=tk.LEFT)
+    sample_summary.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+    sample_note = ttk.Label(sample_pane, foreground="gray", wraplength=420, justify=tk.LEFT)
+    sample_note.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+    sample_text_frame = ttk.Frame(sample_pane)
+    sample_text_frame.pack(fill=tk.BOTH, expand=True)
+    sample_text = tk.Text(sample_text_frame, wrap="word", height=12, undo=True)
+    sample_scrollbar = ttk.Scrollbar(sample_text_frame, orient=tk.VERTICAL, command=sample_text.yview)
+    sample_text.configure(yscrollcommand=sample_scrollbar.set)
+    sample_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    sample_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    sample_text.tag_configure("match", background="#fde68a")
+    # Files of the configured mail folder, the shown one, and the headers of a loaded mail (searched, not shown).
+    sample_state: dict = {"files": [], "index": -1, "title": "", "header_text": ""}
+    preview_job: list = [None]
 
     status_var = tk.StringVar(value=tr("label.status.ready"))
     output_frame = ttk.Frame(container)
@@ -622,8 +690,159 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
                     tr(f"rule.type.{field.type}"),
                     describe_rule(field, current_language),
                     tr("view.field.required_yes") if field.required else tr("view.field.required_no"),
+                    "–",
                 ),
             )
+        schedule_preview()
+
+    # --- Live test against the sample mail ---
+
+    def current_sample() -> SampleMail | None:
+        body = sample_text.get("1.0", "end-1c")
+        if not body.strip() and not sample_state["header_text"]:
+            return None
+        return SampleMail(title=sample_state["title"], body=body, header_text=sample_state["header_text"])
+
+    def update_sample_title() -> None:
+        files, index = sample_state["files"], sample_state["index"]
+        if 0 <= index < len(files):
+            text = tr("preview.position").format(name=sample_state["title"], index=index + 1, total=len(files))
+        else:
+            text = sample_state["title"] or tr("preview.none")
+        sample_title.configure(text=text)
+        sample_prev_button.configure(state=tk.NORMAL if index > 0 else tk.DISABLED)
+        sample_next_button.configure(state=tk.NORMAL if len(files) > 1 and index < len(files) - 1 else tk.DISABLED)
+
+    def show_sample(sample: SampleMail, index: int = -1) -> None:
+        sample_state.update(title=sample.title, header_text=sample.header_text, index=index)
+        sample_text.delete("1.0", tk.END)
+        sample_text.insert("1.0", sample.body)
+        sample_text.edit_reset()
+        update_sample_title()
+        schedule_preview()
+
+    def show_sample_file(path: Path, index: int = -1) -> None:
+        try:
+            show_sample(load_sample(path), index)
+        except OSError as exc:
+            messagebox.showerror(tr("app.title"), tr("error.sample_unreadable").format(file=path, error=exc))
+
+    def refresh_sample_files() -> None:
+        """Offer the mails of the configured folder; show the first one if nothing is shown yet."""
+        folder = setting_path(eml_folder_var.get().strip() or ".", cfg_path.resolve().parent)
+        files = sample_files(folder, eml_glob_var.get().strip() or "*.eml")
+        old_files, old_index = sample_state["files"], sample_state["index"]
+        current = old_files[old_index] if 0 <= old_index < len(old_files) else None
+        sample_state["files"] = files
+        if current in files:
+            sample_state["index"] = files.index(current)
+        elif files and current_sample() is None:
+            show_sample_file(files[0], 0)
+            return
+        else:
+            sample_state["index"] = -1
+        update_sample_title()
+
+    def step_sample(offset: int) -> None:
+        files, index = sample_state["files"], sample_state["index"]
+        new_index = index + offset if index >= 0 else 0
+        if 0 <= new_index < len(files):
+            show_sample_file(files[new_index], new_index)
+
+    def choose_sample_file() -> None:
+        folder = setting_path(eml_folder_var.get().strip() or ".", cfg_path.resolve().parent)
+        chosen = filedialog.askopenfilename(
+            parent=root,
+            title=tr("dialog.choose_sample"),
+            initialdir=str(folder if folder.is_dir() else cfg_path.resolve().parent),
+            filetypes=[(tr("dialog.eml_files"), "*.eml"), (tr("dialog.all_files"), "*")],
+        )
+        if chosen:
+            path = Path(chosen)
+            files = sample_state["files"]
+            show_sample_file(path, files.index(path) if path in files else -1)
+
+    def paste_sample() -> None:
+        try:
+            text = root.clipboard_get()
+        except tk.TclError:
+            text = ""
+        if not text.strip():
+            messagebox.showinfo(tr("app.title"), tr("error.clipboard_empty"))
+            return
+        show_sample(SampleMail(title=tr("preview.pasted"), body=normalize_body(text)))
+
+    def schedule_preview() -> None:
+        # Typing triggers many updates; compute once the input settles.
+        if preview_job[0] is not None:
+            root.after_cancel(preview_job[0])
+        preview_job[0] = root.after(120, update_preview)
+
+    def editor_rule_for_preview() -> FieldRule:
+        # Like saving, but a missing column name or a duplicate does not block the preview.
+        return rule_from_inputs(
+            column=field_column_var.get() or "?",
+            rule_type=field_type[0],
+            labels_text=field_labels_var.get(),
+            start=field_start_var.get(),
+            end=field_end_var.get(),
+            pattern=field_pattern_var.get(),
+            lang=current_language,
+        )
+
+    def update_preview() -> None:
+        preview_job[0] = None
+        sample = current_sample()
+        previews: list[RulePreview | None] = [preview_rule(rule, sample) if sample else None for rule in fields]
+        for index, (rule, preview) in enumerate(zip(fields, previews, strict=True)):
+            iid = str(index)
+            if not fields_view.exists(iid):
+                continue
+            fields_view.set(iid, "result", result_text(preview, current_language))
+            tags = ()
+            if preview is not None and not preview.found:
+                tags = ("missing_required",) if rule.required else ("missing_optional",)
+            fields_view.item(iid, tags=tags)
+        if sample is None:
+            sample_summary.configure(text=tr("preview.no_sample_summary"), foreground="gray")
+        elif fields:
+            text = summary_text(fields, previews, sheet_errors_var.get().strip() or "fehler", current_language)
+            sample_summary.configure(text=text, foreground="#15803d" if text.startswith("✓") else "#b91c1c")
+        else:
+            sample_summary.configure(text="", foreground="gray")
+
+        sample_text.tag_remove("match", "1.0", tk.END)
+        if sample is None:
+            editor_result.configure(text=tr("preview.editor.no_sample"), foreground="gray")
+            return
+        type_inputs = {
+            "between": (field_start_var, field_end_var),
+            "regex": (field_pattern_var,),
+        }.get(field_type[0], (field_labels_var,))
+        if field_type[0] != "email" and not any(variable.get().strip() for variable in type_inputs):
+            # Nothing typed yet: a neutral hint instead of an error.
+            editor_result.configure(text=tr("preview.editor.waiting"), foreground="gray")
+            return
+        try:
+            rule = editor_rule_for_preview()
+        except ValueError as exc:
+            editor_result.configure(text=str(exc), foreground="gray")
+            return
+        preview = preview_rule(rule, sample)
+        if not preview.found:
+            editor_result.configure(text=tr("preview.editor.not_found"), foreground="#b91c1c")
+            return
+        key = "preview.editor.from_header" if preview.from_header else "preview.editor.found"
+        editor_result.configure(text=tr(key).format(value=preview.value), foreground="#15803d")
+        if preview.span is not None:
+            start, end = (f"1.0 + {offset} chars" for offset in preview.span)
+            sample_text.tag_add("match", start, end)
+            sample_text.see(start)
+
+    def on_sample_edited(_event=None) -> None:
+        if sample_text.edit_modified():
+            sample_text.edit_modified(False)
+            schedule_preview()
 
     def apply_language(selected_language: str) -> None:
         nonlocal current_language
@@ -632,6 +851,12 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
         language_label.configure(text=tr("label.language"))
         config_file_label.configure(text=f"{tr('label.config_file')}: {cfg_path}")
         rules_file_label.configure(text=f"{tr('label.rules_file')}: {rules_file}")
+        sample_pane.configure(text=tr("preview.title"))
+        sample_load_button.configure(text=tr("button.sample_load"))
+        sample_paste_button.configure(text=tr("button.sample_paste"))
+        sample_note.configure(text=tr("preview.header_note"))
+        new_field_button.configure(text=tr("button.field_new"))
+        update_sample_title()
         notebook.tab(0, text=tr("tab.config"))
         notebook.tab(1, text=tr("tab.fields"))
         for key, label_widget in form_labels.items():
@@ -749,6 +974,7 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
         rules_text = _read_text_or_empty(rules_file)
         fields = parse_rules_text(rules_text) if rules_text.strip() else []
         refresh_fields_view()
+        refresh_sample_files()
 
     def save_to_disk() -> None:
         cfg_path.write_text(render_config_text(form_to_config()), encoding="utf-8")
@@ -804,6 +1030,15 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
         fields[:] = updated
         refresh_fields_view()
         fields_view.selection_set(str(updated.index(candidate)))
+
+    def new_field() -> None:
+        """Empty editor for a new rule (a selected row would otherwise be replaced)."""
+        fields_view.selection_remove(*fields_view.selection())
+        for variable in (field_column_var, field_labels_var, field_start_var, field_end_var, field_pattern_var):
+            variable.set("")
+        field_required_var.set(True)
+        set_field_type("label")
+        field_column_entry.focus_set()
 
     def add_field() -> None:
         try:
@@ -992,10 +1227,12 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
     open_excel_button = ttk.Button(button_row, text=tr("button.open_excel"), command=open_output)
     open_excel_button.pack(side="right", padx=(0, 8))
 
-    field_buttons = ttk.Frame(fields_tab)
+    field_buttons = ttk.Frame(rules_pane)
     field_buttons.pack(fill=tk.X)
+    new_field_button = ttk.Button(field_buttons, text=tr("button.field_new"), command=new_field)
+    new_field_button.pack(side=tk.LEFT)
     add_update_button = ttk.Button(field_buttons, text=tr("button.field_add_update"), command=add_field)
-    add_update_button.pack(side=tk.LEFT)
+    add_update_button.pack(side=tk.LEFT, padx=(8, 0))
     remove_button = ttk.Button(field_buttons, text=tr("button.field_remove"), command=remove_field)
     remove_button.pack(side=tk.LEFT, padx=(8, 0))
     up_button = ttk.Button(field_buttons, text=tr("button.field_up"), command=lambda: move_field(-1))
@@ -1004,6 +1241,10 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
     down_button.pack(side=tk.LEFT, padx=(8, 0))
     fields_view.bind("<<TreeviewSelect>>", lambda _event: load_selected_field())
     field_type_box.bind("<<ComboboxSelected>>", lambda _event: on_type_selected())
+    sample_text.bind("<<Modified>>", on_sample_edited)
+    preview_inputs = (field_column_var, field_labels_var, field_start_var, field_end_var, field_pattern_var)
+    for variable in (*preview_inputs, sheet_errors_var):
+        variable.trace_add("write", lambda *_args: schedule_preview())
     source_type_var.trace_add("write", lambda *_args: toggle_source_frame())
     language_selector.bind("<<ComboboxSelected>>", lambda _event: apply_language(language_var.get()))
 

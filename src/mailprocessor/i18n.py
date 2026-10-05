@@ -55,6 +55,45 @@ CATALOG: dict[str, dict[str, str]] = {
             "Regulärer Ausdruck (Python). Die erste Klammergruppe ( ) ist der Wert. "
             "Wird nicht mehr in eine einfache Regel zurückverwandelt."
         ),
+        "preview.not_found": "✗ nicht gefunden",
+        "preview.summary.ok": (
+            "✓ Alle {count} Felder gefunden – diese Mail würde in die Excel-Tabelle übernommen."
+        ),
+        "preview.summary.ok_optional_missing": (
+            "✓ Alle Pflichtfelder gefunden (nicht gefunden: {columns}) – diese Mail würde übernommen."
+        ),
+        "preview.summary.missing_one": (
+            "✗ Pflichtfeld {columns} nicht gefunden – diese Mail käme ins Blatt „{sheet}“."
+        ),
+        "preview.summary.missing_many": (
+            "✗ Pflichtfelder {columns} nicht gefunden – diese Mail käme ins Blatt „{sheet}“."
+        ),
+        "preview.title": "Test mit Beispiel-Mail",
+        "button.sample_load": "Mail laden …",
+        "button.sample_paste": "Text einfügen",
+        "button.field_new": "Neues Feld",
+        "preview.position": "{name} ({index} von {total})",
+        "preview.pasted": "Eingefügter Text",
+        "preview.none": "Keine Beispiel-Mail geladen",
+        "preview.no_sample_summary": (
+            "Eine Beispiel-Mail laden oder den Text einer Mail einfügen, um die Regeln direkt zu testen."
+        ),
+        "preview.header_note": (
+            "Die Kopfzeilen der Mail (z. B. From:) werden ebenfalls durchsucht. "
+            "Änderungen am Text hier dienen nur dem Test und ändern keine Mail."
+        ),
+        "preview.editor.found": "In der Beispiel-Mail: ✓ {value}",
+        "preview.editor.from_header": "In der Beispiel-Mail: ✓ {value} (aus den Kopfzeilen der Mail)",
+        "preview.editor.not_found": (
+            "In der Beispiel-Mail: ✗ nicht gefunden – Bezeichnung prüfen oder eine andere Art wählen."
+        ),
+        "preview.editor.no_sample": "Eine Beispiel-Mail laden, um das Ergebnis hier direkt zu sehen.",
+        "preview.editor.waiting": "Eingaben ausfüllen – das Ergebnis in der Beispiel-Mail erscheint hier.",
+        "dialog.choose_sample": "Beispiel-Mail auswählen",
+        "dialog.eml_files": "E-Mails (.eml)",
+        "dialog.all_files": "Alle Dateien",
+        "error.clipboard_empty": "Die Zwischenablage enthält keinen Text. Bitte zuerst den Text einer Mail kopieren.",
+        "error.sample_unreadable": "Die Mail konnte nicht gelesen werden: {file}\n\n{error}",
         "rule.or": " oder ",
         "rule.describe.label": "Zeile nach {labels}",
         "rule.describe.next_line": "Zeile unter {labels}",
@@ -100,6 +139,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "view.field.required": "Pflicht",
         "view.field.type": "Art",
         "view.field.description": "Sucht nach",
+        "view.field.result": "Ergebnis",
         "view.field.required_yes": "ja",
         "view.field.required_no": "nein",
         "error.select_field_remove": "Bitte ein Feld zum Entfernen auswählen",
@@ -207,6 +247,39 @@ CATALOG: dict[str, dict[str, str]] = {
             "Regular expression (Python). The first group ( ) is the value. "
             "It is not turned back into a simple rule."
         ),
+        "preview.not_found": "✗ not found",
+        "preview.summary.ok": "✓ All {count} fields found – this mail would be added to the Excel file.",
+        "preview.summary.ok_optional_missing": (
+            "✓ All required fields found (not found: {columns}) – this mail would be added."
+        ),
+        "preview.summary.missing_one": (
+            "✗ Required field {columns} not found – this mail would go to the “{sheet}” sheet."
+        ),
+        "preview.summary.missing_many": (
+            "✗ Required fields {columns} not found – this mail would go to the “{sheet}” sheet."
+        ),
+        "preview.title": "Test with a sample mail",
+        "button.sample_load": "Load mail …",
+        "button.sample_paste": "Paste text",
+        "button.field_new": "New field",
+        "preview.position": "{name} ({index} of {total})",
+        "preview.pasted": "Pasted text",
+        "preview.none": "No sample mail loaded",
+        "preview.no_sample_summary": "Load a sample mail or paste the text of a mail to test the rules right away.",
+        "preview.header_note": (
+            "The mail's header lines (e.g. From:) are searched too. "
+            "Edits to the text here are only for testing and change no mail."
+        ),
+        "preview.editor.found": "In the sample mail: ✓ {value}",
+        "preview.editor.from_header": "In the sample mail: ✓ {value} (from the mail's header lines)",
+        "preview.editor.not_found": "In the sample mail: ✗ not found – check the label or choose another type.",
+        "preview.editor.no_sample": "Load a sample mail to see the result here right away.",
+        "preview.editor.waiting": "Fill in the inputs – the result in the sample mail appears here.",
+        "dialog.choose_sample": "Choose a sample mail",
+        "dialog.eml_files": "Emails (.eml)",
+        "dialog.all_files": "All files",
+        "error.clipboard_empty": "The clipboard contains no text. Copy the text of a mail first.",
+        "error.sample_unreadable": "Could not read the mail: {file}\n\n{error}",
         "rule.or": " or ",
         "rule.describe.label": "Line after {labels}",
         "rule.describe.next_line": "Line below {labels}",
@@ -252,6 +325,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "view.field.required": "Required",
         "view.field.type": "Type",
         "view.field.description": "Looks for",
+        "view.field.result": "Result",
         "view.field.required_yes": "yes",
         "view.field.required_no": "no",
         "error.select_field_remove": "Select a field row to remove",

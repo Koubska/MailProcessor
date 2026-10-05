@@ -221,7 +221,8 @@ Built with `tkinter`; intentionally small:
 
 * Main settings: source (IMAP, or an `.eml` folder chosen with a folder picker; the file pattern is only configurable in `config.toml`) and the Excel file (file picker)
 * Technical settings (log level, SQLite path, sheet names, limits) under a collapsed "Erweiterte Einstellungen" section
-* Editor for parsing fields (add, update, remove, reorder)
+* Editor for parsing fields (new, add/update, remove, reorder) with the rule types from section 8
+* Live test with a sample mail ("Test mit Beispiel-Mail", `preview.py`): the first mail of the configured folder is shown automatically (◀ ▶ steps through the folder); any `.eml` can be loaded, or mail text pasted. The rule list shows each rule's result (missing required fields in red), the editor shows the result of the rule being edited while typing and highlights the value in the mail text, and a summary says whether the mail would go to the data or the error sheet. Values are computed like in a run, including the header fallback. Sample mails are only read; edits to the shown text change no file.
 * Save and reload; "Testlauf" runs with `dry_run` (nothing is written), "Ausführen" runs for real. The `dry_run` value in `config.toml` is kept but ignored by the GUI
 * "Excel öffnen" opens the workbook with the system's default program
 * Progress bar with "Verarbeite E-Mail n von N" and a "Stopp" button while a run is active

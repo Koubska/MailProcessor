@@ -32,7 +32,8 @@ py -3 -m venv .venv; .venv\Scripts\pip install -q -e .; .venv\Scripts\mailproces
    `mails`, oder mit **Durchsuchen …** einen anderen Ordner wählen) oder **imap** (Ihr Postfach; das
    Passwort wird nie gespeichert).
 2. Reiter **Parsing-Felder**: eine Regel pro Excel-Spalte. Unter **Art** wählen, wie der Wert gefunden wird,
-   z. B. **Text nach Bezeichnung** mit der Bezeichnung `Telefonnummer:`. Die Standardregeln passen zu
+   z. B. **Text nach Bezeichnung** mit der Bezeichnung `Telefonnummer:`. Rechts wird eine Beispiel-Mail
+   angezeigt; dort sehen Sie sofort, was jede Regel findet. Die Standardregeln passen zu
    [docs/example.eml](docs/example.eml).
 3. Auf **Ausführen** klicken.
 
