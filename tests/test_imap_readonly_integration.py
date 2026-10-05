@@ -101,12 +101,14 @@ def imap_server(monkeypatch):
         server.server_close()
 
 
-def _config(tmp_path: Path, port: int) -> AppConfig:
+def _config(tmp_path: Path, port: int, mailbox: str = "INBOX") -> AppConfig:
     return AppConfig(
         app=AppSection(sqlite_path=str(tmp_path / "ledger.db"), output_xlsx=str(tmp_path / "out.xlsx")),
         source=SourceConfig(
             type="imap",
-            imap=ImapSourceConfig(host="127.0.0.1", port=port, username="u", password="pw", use_ssl=True),
+            imap=ImapSourceConfig(
+                host="127.0.0.1", port=port, username="u", password="pw", mailbox=mailbox, use_ssl=True
+            ),
         ),
     )
 
@@ -147,3 +149,13 @@ def test_dry_run_reads_without_touching_mailbox_or_disk(imap_server, tmp_path: P
     assert summary.processed == 2
     assert state.messages == original
     assert list(tmp_path.iterdir()) == []
+
+
+def test_mailbox_names_with_spaces_and_umlauts_reach_the_server_quoted(imap_server, tmp_path: Path) -> None:
+    state, port = imap_server
+    config = _config(tmp_path, port, mailbox="Anfragen Schüler")
+
+    summary = run_pipeline(config, ParsingRules(fields=[FieldRule(column="Name", pattern=r"(?m)^Name:\s*(.+)$")]))
+
+    assert summary.processed == 2
+    assert 'EXAMINE "Anfragen Sch&APw-ler"' in state.commands
