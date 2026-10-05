@@ -316,3 +316,19 @@ def test_read_only_client_exposes_no_mutating_commands() -> None:
     public = {name for name in dir(ReadOnlyImapClient) if not name.startswith("_")}
 
     assert public == {"login", "examine", "uid_search", "uid_fetch", "logout"}
+
+
+def test_iter_imap_messages_reports_total_before_fetching() -> None:
+    fake_client = FakeImapClient(
+        fetch_payloads={
+            b"101": _build_raw_message("a@example.com", "x"),
+            b"202": _build_raw_message("b@example.com", "y"),
+        }
+    )
+    totals: list[int] = []
+
+    items = iter_imap_messages(_cfg(), client_factory=lambda _host, _port: fake_client, on_total=totals.append)
+    next(items)
+
+    assert totals == [2]
+    items.close()

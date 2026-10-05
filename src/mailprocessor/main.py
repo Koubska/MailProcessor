@@ -16,6 +16,7 @@ from mailprocessor.config import (
     load_app_config,
     load_parsing_rules,
 )
+from mailprocessor.logfile import attach_log_file
 from mailprocessor.processor import run_pipeline
 
 PASSWORD_ENV_VAR = "MAILPROCESSOR_IMAP_PASSWORD"
@@ -105,6 +106,7 @@ def cli(
         app_config = load_app_config(config)
         parsing_rules = load_parsing_rules(rules)
         _configure_logging(app_config.app.log_level)
+        attach_log_file(config.resolve().parent)
 
         if dry_run:
             app_config.app.dry_run = True

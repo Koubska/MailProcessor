@@ -3,6 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 import mailprocessor.main as main_module
@@ -16,6 +17,12 @@ from mailprocessor.config import (
     SourceConfig,
 )
 from mailprocessor.processor import RunSummary
+
+
+@pytest.fixture(autouse=True)
+def _no_log_file(monkeypatch) -> None:
+    # These tests pass relative config paths; a log file would land in the working directory.
+    monkeypatch.setattr(main_module, "attach_log_file", lambda _config_dir: None)
 
 
 def _build_config() -> AppConfig:

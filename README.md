@@ -40,6 +40,9 @@ letzte Spalte **E-Mail-Inhalt** enthält jeweils den vollständigen Text der E-M
 E-Mails, die nicht verarbeitet werden konnten, mit Grund. Einfach erneut ausführen, wenn neue E-Mails
 eingehen; nur neue werden hinzugefügt.
 
+Bei Problemen: unter **Erweiterte Einstellungen → Protokoll öffnen** steht, was passiert ist. Das Protokoll
+enthält keine E-Mail-Inhalte und kann einer Fehlermeldung beigelegt werden.
+
 ## Entwicklung
 
 ```bash

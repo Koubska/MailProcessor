@@ -103,3 +103,14 @@ def test_unknown_charset_falls_back_to_utf8(tmp_path: Path) -> None:
     )
 
     assert parse_eml_file(path, source_location=str(tmp_path)).body_text == "Grüße"
+
+
+def test_iter_eml_messages_reports_total_before_reading(tmp_path: Path) -> None:
+    for name in ("a.eml", "b.eml", "c.eml"):
+        (tmp_path / name).write_text("Message-ID: <x@example.com>\n\nBody", encoding="utf-8")
+    totals: list[int] = []
+
+    items = iter_eml_messages(tmp_path, on_total=totals.append)
+    next(items)
+
+    assert totals == [3]

@@ -18,4 +18,5 @@ out/
 /config.toml
 /parsing_rules.toml
 /mails/
+/logs/
 uv.lock

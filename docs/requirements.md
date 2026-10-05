@@ -168,6 +168,8 @@ SQLite stores the processing history (`sqlite_path`).
 * A message whose body changed is processed again (new `content_hash`).
 * The workbook is saved first; the ledger is committed only afterwards. A crash, or a workbook locked by Excel, therefore never leaves the ledger ahead of the workbook, and the run can simply be repeated.
 * `dry_run` / `--dry-run` parses and reports without writing the workbook or the ledger.
+* A run can be stopped (GUI "Stopp"). It stops before the next message and saves everything handled until then, so the next run continues there.
+* "Alles neu exportieren" (GUI, advanced settings) renames the current workbook to `<name>_backup_<date>_<time>.xlsx`, clears the ledger and starts a run, so every message is exported again into a fresh workbook. The workbook is moved first; if it is locked by Excel, nothing changes.
 
 ---
 
@@ -205,6 +207,7 @@ Built with `tkinter`; intentionally small:
 * Editor for parsing fields (add, update, remove, reorder)
 * Save and reload; "Testlauf" runs with `dry_run` (nothing is written), "Ausführen" runs for real. The `dry_run` value in `config.toml` is kept but ignored by the GUI
 * "Excel öffnen" opens the workbook with the system's default program
+* Progress bar with "Verarbeite E-Mail n von N" and a "Stopp" button while a run is active
 * Plain-language run summary and error messages with a concrete next step; technical details stay visible
 * German by default, English available
 
@@ -214,7 +217,7 @@ The pipeline runs on a background thread so the window stays responsive.
 
 # 14. Logging
 
-Python's standard logging. Logs stay local (currently written to the console/stderr).
+Python's standard logging. Logs stay local: the console/stderr (CLI) or the output box (GUI), plus the log file `logs/mailprocessor.log` next to `config.toml` (rotated at 1 MB, 3 old files kept). The GUI opens it with "Protokoll öffnen" under the advanced settings. The file gets the same records as the console, at the configured `log_level`; if it cannot be created, the app runs without it.
 
 Never log:
 
@@ -254,7 +257,5 @@ The following were part of the original Outlook-focused plan. They are not imple
 * **Outlook desktop source** (Windows, `pywin32`/COM, existing Outlook profile, no credentials, read-only, `EntryID` as identity) implemented as another source that yields `NormalizedMail` / `MailReadError`.
 * Subject, date-range and unread filters.
 * Parser version tracking in the ledger, so that parser changes can deliberately trigger reprocessing.
-* Local log files with rotation.
-* Progress display (`Processing 137 / 317`) and cancellation in the GUI.
 * Date-typed columns.
 * Remembering GUI settings per user (e.g. under `%LOCALAPPDATA%`).

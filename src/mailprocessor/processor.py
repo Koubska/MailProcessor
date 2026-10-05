@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+import threading
+from collections.abc import Callable, Iterator
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -11,7 +12,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from mailprocessor.config import AppConfig, ParsingRules
-from mailprocessor.errors import MailFolderNotFoundError
+from mailprocessor.errors import MailFolderNotFoundError, WorkbookLockedError
 from mailprocessor.excel_writer import ExcelOutput
 from mailprocessor.ledger import Ledger, LedgerKey, compute_content_hash
 from mailprocessor.models import MailReadError, NormalizedMail
@@ -21,6 +22,9 @@ from mailprocessor.sources.imap_source import iter_imap_messages
 
 logger = logging.getLogger(__name__)
 
+# Called as progress(current, total) while a run reads messages; current counts from 1.
+ProgressCallback = Callable[[int, int], None]
+
 
 @dataclass(frozen=True)
 class RunSummary:
@@ -28,6 +32,8 @@ class RunSummary:
     processed: int
     skipped: int
     failed: int
+    # True if the run was stopped early; everything handled until then was saved.
+    cancelled: bool = False
 
 
 def _is_within_max_age(message: NormalizedMail, max_age_days: int, now_utc: datetime) -> bool:
@@ -46,18 +52,37 @@ def _is_within_max_age(message: NormalizedMail, max_age_days: int, now_utc: date
 
 
 def iter_source_messages(
-    app_cfg: AppConfig, now_utc: datetime | None = None
+    app_cfg: AppConfig, now_utc: datetime | None = None, progress: ProgressCallback | None = None
 ) -> Iterator[NormalizedMail | MailReadError]:
     effective_now_utc = now_utc or datetime.now(UTC)
     max_age_days = app_cfg.app.max_age_days
+    total = current = 0
+
+    def set_total(count: int) -> None:
+        nonlocal total
+        total = count
+
+    def advance() -> None:
+        # Counts every message the source returns, including ones filtered out below.
+        nonlocal current
+        current += 1
+        if progress is not None:
+            progress(current, total)
+
     if app_cfg.source.type == "imap":
         assert app_cfg.source.imap is not None
         # IMAP filters by age on the server (SEARCH SINCE).
-        yield from iter_imap_messages(app_cfg.source.imap, max_age_days=max_age_days, now_utc=effective_now_utc)
+        for message in iter_imap_messages(
+            app_cfg.source.imap, max_age_days=max_age_days, now_utc=effective_now_utc, on_total=set_total
+        ):
+            advance()
+            yield message
         return
 
     assert app_cfg.source.eml is not None
-    for message in iter_eml_messages(Path(app_cfg.source.eml.folder), glob_pattern=app_cfg.source.eml.glob):
+    eml = app_cfg.source.eml
+    for message in iter_eml_messages(Path(eml.folder), glob_pattern=eml.glob, on_total=set_total):
+        advance()
         if isinstance(message, MailReadError) or _is_within_max_age(message, max_age_days, effective_now_utc):
             yield message
 
@@ -91,10 +116,17 @@ def _check_eml_folder(app_cfg: AppConfig) -> None:
             raise ValueError(f"{setting} must not be inside the mail folder {eml_folder}")
 
 
-def run_pipeline(app_cfg: AppConfig, rules: ParsingRules) -> RunSummary:
+def run_pipeline(
+    app_cfg: AppConfig,
+    rules: ParsingRules,
+    progress: ProgressCallback | None = None,
+    cancel: threading.Event | None = None,
+) -> RunSummary:
     """Process new messages. Nothing is written when `dry_run` is set.
 
     `max_messages` limits how many *new* (not already processed) messages one run handles.
+    Setting `cancel` stops before the next message; what was handled until then is saved as usual,
+    so the next run continues where this one stopped.
     """
     dry_run = app_cfg.app.dry_run
     dry_note = " (dry run: nothing is written)" if dry_run else ""
@@ -111,10 +143,11 @@ def run_pipeline(app_cfg: AppConfig, rules: ParsingRules) -> RunSummary:
         excel.check_writable()
 
     seen = processed = skipped = failed = 0
+    cancelled = False
     max_messages = app_cfg.app.max_messages
 
     with Ledger(Path(app_cfg.app.sqlite_path), read_only=dry_run) as ledger, closing(
-        iter_source_messages(app_cfg)
+        iter_source_messages(app_cfg, progress=progress)
     ) as messages:
         if excel.is_new and ledger.count_processed():
             logger.warning(
@@ -125,6 +158,10 @@ def run_pipeline(app_cfg: AppConfig, rules: ParsingRules) -> RunSummary:
             )
 
         for item in messages:
+            if cancel is not None and cancel.is_set():
+                cancelled = True
+                logger.info("Stopped by the user; saving what was processed so far")
+                break
             is_mail = isinstance(item, NormalizedMail)
             key = LedgerKey(
                 source_type=item.source_type,
@@ -189,4 +226,30 @@ def run_pipeline(app_cfg: AppConfig, rules: ParsingRules) -> RunSummary:
     if failed:
         logger.warning("%d message(s) failed; details are in the '%s' sheet", failed, app_cfg.app.sheet_errors)
 
-    return RunSummary(seen=seen, processed=processed, skipped=skipped, failed=failed)
+    return RunSummary(seen=seen, processed=processed, skipped=skipped, failed=failed, cancelled=cancelled)
+
+
+def start_over(app_cfg: AppConfig, now: datetime | None = None) -> Path | None:
+    """Prepare a full re-export: keep the current workbook as a backup and forget all processed messages.
+
+    The mails themselves are not touched. Returns the backup file, or None if there was no workbook yet.
+    The workbook is moved first, so a workbook locked by Excel stops this before anything changes.
+    """
+    workbook = Path(app_cfg.app.output_xlsx)
+    backup = None
+    if workbook.exists():
+        # Local time, as users read it.
+        stamp = (now or datetime.now().astimezone()).strftime("%Y-%m-%d_%H-%M-%S")
+        backup = workbook.with_name(f"{workbook.stem}_backup_{stamp}{workbook.suffix}")
+        try:
+            workbook.rename(backup)
+        except PermissionError:
+            raise WorkbookLockedError(f"Cannot move {workbook}. Is it open in Excel? Close it and try again.") from None
+        logger.info("Moved %s to %s", workbook.name, backup.name)
+    ledger_path = Path(app_cfg.app.sqlite_path)
+    if ledger_path.exists():
+        with Ledger(ledger_path) as ledger:
+            ledger.clear()
+            ledger.commit()
+        logger.info("Cleared the processing history in %s", ledger_path)
+    return backup

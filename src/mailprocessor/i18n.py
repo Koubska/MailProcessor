@@ -66,6 +66,20 @@ CATALOG: dict[str, dict[str, str]] = {
         "error.select_field_move": "Bitte ein Feld zum Verschieben auswählen",
         "button.open_excel": "Excel öffnen",
         "button.test_run": "Testlauf",
+        "button.stop": "Stopp",
+        "button.start_over": "Alles neu exportieren …",
+        "button.open_log": "Protokoll öffnen",
+        "label.status.progress": "Verarbeite E-Mail {current} von {total} …",
+        "label.status.stopping": "Wird angehalten …",
+        "summary.cancelled": "Angehalten – beim nächsten Ausführen geht es an dieser Stelle weiter.",
+        "confirm.start_over": (
+            "Alle E-Mails werden noch einmal in eine neue Excel-Datei übertragen.\n\n"
+            "Die bisherige Excel-Datei bleibt als Sicherung erhalten (Name mit „_backup_“ und Datum). "
+            "Die E-Mails selbst werden nicht verändert.\n\nFortfahren?"
+        ),
+        "info.backup_created": "Bisherige Excel-Datei gesichert als {file}",
+        "info.no_log_yet": "Es gibt noch kein Protokoll ({file}). Es entsteht beim ersten Lauf.",
+        "error.open_file": "Die Datei konnte nicht geöffnet werden: {file}\n\n{error}",
         "button.advanced_show": "▸ Erweiterte Einstellungen",
         "button.advanced_hide": "▾ Erweiterte Einstellungen",
         "dialog.choose_output_xlsx": "Excel-Datei für die Ergebnisse wählen",
@@ -165,6 +179,20 @@ CATALOG: dict[str, dict[str, str]] = {
         "error.select_field_move": "Select a field row to move",
         "button.open_excel": "Open Excel",
         "button.test_run": "Test run",
+        "button.stop": "Stop",
+        "button.start_over": "Export everything again …",
+        "button.open_log": "Open log",
+        "label.status.progress": "Processing email {current} of {total} …",
+        "label.status.stopping": "Stopping …",
+        "summary.cancelled": "Stopped – the next run continues from here.",
+        "confirm.start_over": (
+            "All emails are transferred again into a new Excel file.\n\n"
+            "The current Excel file is kept as a backup (name with “_backup_” and the date). "
+            "The emails themselves are not changed.\n\nContinue?"
+        ),
+        "info.backup_created": "Previous Excel file backed up as {file}",
+        "info.no_log_yet": "There is no log yet ({file}). It is created by the first run.",
+        "error.open_file": "Could not open the file: {file}\n\n{error}",
         "button.advanced_show": "▸ Advanced settings",
         "button.advanced_hide": "▾ Advanced settings",
         "dialog.choose_output_xlsx": "Choose the Excel file for the results",

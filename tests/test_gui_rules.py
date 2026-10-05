@@ -229,3 +229,14 @@ def test_open_in_default_app_uses_the_system_opener(monkeypatch, tmp_path: Path,
     open_in_default_app(tmp_path / "out.xlsx")
 
     assert calls == [[command, str(tmp_path / "out.xlsx")]]
+
+
+def test_run_summary_text_mentions_a_stopped_run() -> None:
+    summary = RunSummary(seen=2, processed=2, skipped=0, failed=0, cancelled=True)
+
+    text = run_summary_text(summary, "out.xlsx", "fehler", dry_run=False, lang="de")
+
+    assert text == (
+        "Angehalten – beim nächsten Ausführen geht es an dieser Stelle weiter. "
+        "2 neue Zeile(n) in out.xlsx eingetragen."
+    )

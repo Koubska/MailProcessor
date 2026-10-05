@@ -93,6 +93,12 @@ class Ledger:
         )
         return cursor.fetchone() is not None
 
+    def clear(self) -> None:
+        """Forget all processed and failed messages (within the open transaction), for a full re-export."""
+        if self.read_only:
+            raise RuntimeError("Ledger was opened read-only")
+        self._connection.execute("DELETE FROM processed_messages")
+
     def count_processed(self) -> int:
         cursor = self._connection.execute("SELECT COUNT(*) FROM processed_messages WHERE status = 'processed'")
         return int(cursor.fetchone()[0])

@@ -130,7 +130,9 @@ def iter_imap_messages(
     client_factory: Callable[[str, int], ImapClient] | None = None,
     max_age_days: int = 0,
     now_utc: datetime | None = None,
+    on_total: Callable[[int], None] | None = None,
 ) -> Iterator[NormalizedMail | MailReadError]:
+    """Yield the matching messages; `on_total` receives their number before the first one is fetched."""
     if not config.password:
         raise MissingPasswordError("IMAP password is missing")
     search_args = _build_search_args(config.sender_filter, max_age_days, now_utc or datetime.now(UTC))
@@ -159,6 +161,8 @@ def iter_imap_messages(
         if status != "OK":
             raise OSError("IMAP search failed")
         if not search_data:
+            if on_total is not None:
+                on_total(0)
             return
         uid_bytes = search_data[0]
         if not isinstance(uid_bytes, bytes):
@@ -166,6 +170,8 @@ def iter_imap_messages(
 
         uids = uid_bytes.split()
         logger.info("Found %d message(s) matching %s", len(uids), " ".join(search_args))
+        if on_total is not None:
+            on_total(len(uids))
         for uid in uids:
             logger.debug("Fetching IMAP uid %s", uid.decode("ascii", errors="replace"))
             status, fetch_data = client.uid_fetch(uid)

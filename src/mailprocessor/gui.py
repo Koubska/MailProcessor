@@ -36,7 +36,8 @@ from mailprocessor.errors import (
     WorkbookLockedError,
 )
 from mailprocessor.i18n import resolve_language, t
-from mailprocessor.processor import RunSummary, run_pipeline
+from mailprocessor.logfile import attach_log_file, log_file_path
+from mailprocessor.processor import RunSummary, run_pipeline, start_over
 
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(message)s"
 
@@ -156,16 +157,19 @@ def path_setting(chosen: Path, config_dir: Path) -> str:
 
 def run_summary_text(summary: RunSummary, output_name: str, error_sheet: str, dry_run: bool, lang: str) -> str:
     """Plain-language result of a run for the output box and status bar."""
+    parts = [t("summary.cancelled", lang)] if summary.cancelled else []
     if dry_run:
-        return t("summary.dry_run", lang).format(
-            new=summary.processed + summary.failed, ok=summary.processed, failed=summary.failed
+        parts.append(
+            t("summary.dry_run", lang).format(
+                new=summary.processed + summary.failed, ok=summary.processed, failed=summary.failed
+            )
         )
-    parts = []
+        return " ".join(parts)
     if summary.processed:
         parts.append(t("summary.processed", lang).format(count=summary.processed, file=output_name))
     if summary.failed:
         parts.append(t("summary.failed", lang).format(count=summary.failed, sheet=error_sheet))
-    if not parts:
+    if not summary.processed and not summary.failed:
         parts.append(t("summary.nothing_new", lang))
     if summary.skipped:
         parts.append(t("summary.skipped", lang).format(count=summary.skipped))
@@ -371,6 +375,12 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
     add_row(advanced_frame, 3, "label.sheet_errors", ttk.Entry(advanced_frame, textvariable=sheet_errors_var))
     add_row(advanced_frame, 4, "label.max_age_days", ttk.Entry(advanced_frame, textvariable=max_age_days_var))
     add_row(advanced_frame, 5, "label.max_messages", ttk.Entry(advanced_frame, textvariable=max_messages_var))
+    advanced_buttons = ttk.Frame(advanced_frame)
+    advanced_buttons.grid(row=6, column=1, sticky="w", pady=(4, 0))
+    start_over_button = ttk.Button(advanced_buttons, command=lambda: on_start_over())
+    start_over_button.pack(side=tk.LEFT)
+    open_log_button = ttk.Button(advanced_buttons, command=lambda: open_log())
+    open_log_button.pack(side=tk.LEFT, padx=(8, 0))
 
     def update_advanced_toggle() -> None:
         key = "button.advanced_hide" if advanced_visible.get() else "button.advanced_show"
@@ -473,7 +483,13 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
     output.configure(yscrollcommand=output_scrollbar.set, state=tk.DISABLED)
     output.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     output_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    ttk.Label(container, textvariable=status_var).grid(row=4, column=0, sticky="w", pady=(8, 0))
+    status_row = ttk.Frame(container)
+    status_row.grid(row=4, column=0, sticky="ew", pady=(8, 0))
+    ttk.Label(status_row, textvariable=status_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
+    stop_button = ttk.Button(status_row, text=tr("button.stop"), state=tk.DISABLED, command=lambda: stop_run())
+    stop_button.pack(side=tk.RIGHT, padx=(8, 0))
+    progress_bar = ttk.Progressbar(status_row, mode="determinate", length=220)
+    progress_bar.pack(side=tk.RIGHT)
 
     def append_output(text: str) -> None:
         output.configure(state=tk.NORMAL)
@@ -529,6 +545,9 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
         reload_button.configure(text=tr("button.reload"))
         run_button.configure(text=tr("button.run"))
         test_run_button.configure(text=tr("button.test_run"))
+        stop_button.configure(text=tr("button.stop"))
+        start_over_button.configure(text=tr("button.start_over"))
+        open_log_button.configure(text=tr("button.open_log"))
         open_excel_button.configure(text=tr("button.open_excel"))
         add_update_button.configure(text=tr("button.field_add_update"))
         remove_button.configure(text=tr("button.field_remove"))
@@ -705,31 +724,62 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
         except OSError as exc:
             messagebox.showerror(tr("app.title"), tr("error.open_excel").format(file=path, error=exc))
 
+    def open_log() -> None:
+        path = log_file_path(cfg_path.resolve().parent)
+        if not path.exists():
+            messagebox.showinfo(tr("app.title"), tr("info.no_log_yet").format(file=path))
+            return
+        try:
+            open_in_default_app(path)
+        except OSError as exc:
+            messagebox.showerror(tr("app.title"), tr("error.open_file").format(file=path, error=exc))
+
+    cancel_event = threading.Event()
+
     def set_busy(busy: bool) -> None:
         state = tk.DISABLED if busy else tk.NORMAL
-        for button in (run_button, test_run_button, save_button, reload_button):
+        for button in (run_button, test_run_button, save_button, reload_button, start_over_button):
             button.configure(state=state)
+        stop_button.configure(state=tk.NORMAL if busy else tk.DISABLED)
+        progress_bar.configure(value=0, maximum=1)
+
+    def stop_run() -> None:
+        cancel_event.set()
+        stop_button.configure(state=tk.DISABLED)
+        status_var.set(tr("label.status.stopping"))
+
+    def show_progress(current: int, total: int) -> None:
+        progress_bar.configure(maximum=max(total, 1), value=current)
+        if not cancel_event.is_set():
+            status_var.set(tr("label.status.progress").format(current=current, total=total))
 
     def run_worker(app_config: AppConfig, parsing_rules: ParsingRules) -> None:
         # Runs off the UI thread; must not touch tkinter objects.
+        def report_progress(current: int, total: int) -> None:
+            run_results.put(("progress", (current, total)))
+
         try:
-            run_results.put(("ok", (app_config, run_pipeline(app_config, parsing_rules))))
+            summary = run_pipeline(app_config, parsing_rules, progress=report_progress, cancel=cancel_event)
+            run_results.put(("ok", (app_config, summary)))
         except Exception as exc:
             if not isinstance(exc, (ValueError, OSError)):
                 package_logger.debug("Unexpected error", exc_info=True)
             run_results.put(("error", exc))
 
     def poll_run_result() -> None:
-        # Show all queued log lines; the run's result ("ok"/"error") is always the last item.
+        # Show all queued log lines and progress; the run's result ("ok"/"error") is always the last item.
         while True:
             try:
                 kind, payload = run_results.get_nowait()
             except queue.Empty:
                 root.after(100, poll_run_result)
                 return
-            if kind != "log":
+            if kind == "log":
+                append_output(payload)
+            elif kind == "progress":
+                show_progress(*payload)
+            else:
                 break
-            append_output(payload)
         set_busy(False)
         if kind == "ok":
             app_config, summary = payload
@@ -763,11 +813,28 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
             messagebox.showerror(tr("app.title"), friendly_error(exc, current_language))
             return
         package_logger.setLevel(app_config.app.log_level)
+        attach_log_file(cfg_path.resolve().parent)
         append_output(f"--- {time.strftime('%H:%M:%S')} ---")
+        cancel_event.clear()
         set_busy(True)
         status_var.set(tr("label.status.running"))
         threading.Thread(target=run_worker, args=(app_config, parsing_rules), daemon=True).start()
         root.after(100, poll_run_result)
+
+    def on_start_over() -> None:
+        if not messagebox.askyesno(tr("app.title"), tr("confirm.start_over"), icon="warning"):
+            return
+        try:
+            save_to_disk()
+            app_config = load_app_config(cfg_path)
+            attach_log_file(cfg_path.resolve().parent)
+            backup = start_over(app_config)
+        except (ValueError, OSError) as exc:
+            messagebox.showerror(tr("app.title"), friendly_error(exc, current_language))
+            return
+        if backup is not None:
+            append_output(tr("info.backup_created").format(file=backup.name))
+        execute_run(dry_run=False)
 
     button_row = ttk.Frame(container)
     button_row.grid(row=2, column=0, sticky="ew", pady=(12, 0))

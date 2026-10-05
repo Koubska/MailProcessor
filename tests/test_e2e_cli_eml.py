@@ -125,6 +125,12 @@ def test_cli_eml_end_to_end_with_excel_and_idempotency(tmp_path: Path) -> None:
     assert workbook["daten"].max_row == 2
     assert workbook["fehler"].max_row == 2
 
+    # The log file next to the config names the mails but contains no mail content or extracted values.
+    log_text = (tmp_path / "logs" / "mailprocessor.log").read_text(encoding="utf-8")
+    assert "good.eml" in log_text and "bad.eml" in log_text
+    for confidential in ("Jan Must+", "1234 567890", "Experimente", "max.mustermann@mail.com"):
+        assert confidential not in log_text
+
     second_run = runner.invoke(main_module.app, ["--config", str(config_path), "--rules", str(rules_path)])
     assert second_run.exit_code == 0
     assert "seen=2 processed=0 skipped=1 failed=1" in second_run.stdout
