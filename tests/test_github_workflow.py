@@ -43,14 +43,13 @@ def test_builds_only_for_tags_after_tests_on_every_platform() -> None:
 
     assert TAG_CONDITION in build_job
     assert "needs: [test, lint]" in build_job
-    # Tag-only steps: the version check and the provenance attestation (Dependabot PRs are built, not attested).
-    for step in ("scripts/check_version.py", "actions/attest-build-provenance"):
+    # Tag-only steps: the version from the tag and the provenance attestation (Dependabot PRs are built, not attested).
+    for step in ('uv version "${GITHUB_REF_NAME#v}"', "actions/attest-build-provenance"):
         step_text = build_job[build_job.rindex("- ", 0, build_job.index(step)) : build_job.index(step)]
         assert TAG_CONDITION in step_text, step
+    assert build_job.index("uv version") < build_job.index("scripts/build_executable.py")
     assert "subject-path: dist/mailprocessor-${{ matrix.platform }}.zip" in build_job
     assert "id-token: write" in build_job and "attestations: write" in build_job
-    # The version check runs before anything is built.
-    assert build_job.index("scripts/check_version.py") < build_job.index("scripts/build_executable.py")
     assert "uv sync --locked --group build" in build_job
     for os_name, platform in (("windows-latest", "windows"), ("macos-latest", "macos"), ("ubuntu-latest", "linux")):
         assert re.search(rf"- os: {os_name}( +#[^\n]*)?\n +platform: {platform}\n", build_job)

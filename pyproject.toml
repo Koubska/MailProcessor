@@ -1,6 +1,7 @@
 [project]
 name = "mailprocessor"
-version = "3.0.0"
+# Releases take their version from the git tag (set by CI at build time); this value is not maintained.
+version = "0.0.0"
 description = "Read-only mail processor with configurable body parsing and Excel export"
 readme = "README.md"
 license = "MIT"
