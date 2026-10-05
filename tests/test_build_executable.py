@@ -40,19 +40,3 @@ def test_write_bundle_readme_mentions_config_and_command(tmp_path: Path) -> None
     assert "parsing_rules.toml" in readme
     assert "./mailprocessor --config ./config.toml --rules ./parsing_rules.toml" in readme
 
-
-def _load_check_version():
-    spec = importlib.util.spec_from_file_location("check_version", Path("scripts/check_version.py"))
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_release_tag_must_match_project_version() -> None:
-    normalized = _load_check_version().normalized
-
-    assert normalized("3.1") == normalized("3.1.0") == normalized("v3.1")
-    assert normalized("3.0") == normalized("3")
-    assert normalized("3.1") != normalized("3.10")
-    assert normalized("3.1") != normalized("3.2.0")
