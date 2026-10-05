@@ -56,6 +56,8 @@ keine E-Mail-Inhalte und kann einer Fehlermeldung beigelegt werden.
 uv run pytest
 ```
 
+Änderungen an `main` laufen nur über Pull Requests, die grüne Tests brauchen; Details in [AGENTS.md](AGENTS.md).
+
 Herkunft eines Downloads prüfen: `gh attestation verify mailprocessor-windows.zip --repo Koubska/MailProcessor`.
 
 Spezifikation: [docs/requirements.md](docs/requirements.md). Regeln für Mitwirkende: [AGENTS.md](AGENTS.md).
