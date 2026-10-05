@@ -103,6 +103,9 @@ CATALOG: dict[str, dict[str, str]] = {
         "card.mails.imap_incomplete": "Postfach noch nicht eingerichtet.",
         "card.mails.imap_password": "Postfach {user} – bitte das Passwort eingeben (wird nicht gespeichert).",
         "card.mails.imap_ready": "Postfach {user} auf {host}",
+        "card.mails.filter_subject": "nur mit Betreff {entries}",
+        "card.mails.filter_sender": "nur von {entries}",
+        "card.mails.filter_or": "oder",
         "card.fields.none": "Noch keine Felder angelegt.",
         "card.fields.count": "{count} Feld(er)",
         "card.fields.ok": "{count} – in der Beispiel-Mail alles gefunden",
@@ -158,8 +161,15 @@ CATALOG: dict[str, dict[str, str]] = {
         "mails.imap.password_hint": "wird nicht gespeichert – nach jedem Start neu eingeben",
         "mails.imap.mailbox": "Ordner im Postfach",
         "mails.imap.mailbox_hint": "INBOX = Posteingang",
-        "mails.imap.sender_filter": "Nur E-Mails von",
-        "mails.imap.sender_filter_hint": "optional, z. B. formular@schule.de",
+        "mails.filter.title": "Welche E-Mails übertragen?",
+        "mails.filter.hint": (
+            "Leer lassen = alle E-Mails. Andere E-Mails werden einfach nicht beachtet (sie erscheinen nicht "
+            "als Problem). Mehrere Möglichkeiten mit ; trennen, Groß-/Kleinschreibung ist egal."
+        ),
+        "mails.filter.subject": "Betreff enthält",
+        "mails.filter.subject_hint": "z. B. Kontaktformular",
+        "mails.filter.sender": "Absender enthält",
+        "mails.filter.sender_hint": "Adresse oder Name, z. B. formular@schule.de",
         "mails.imap.ssl": "Verschlüsselte Verbindung (SSL)",
         "mails.imap.port": "Port",
         "mails.imap.testing": "Verbinde …",
@@ -286,6 +296,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "summary.failed": "{count} E-Mail(s) mit Problemen – Details im Blatt „{sheet}“.",
         "summary.nothing_new": "Keine neuen E-Mails gefunden.",
         "summary.skipped": "{count} bereits verarbeitete E-Mail(s) übersprungen.",
+        "summary.filtered": "{count} E-Mail(s) passten nicht zum Filter (Betreff/Absender) und wurden nicht beachtet.",
         "error.details": "Details",
         "error.workbook_locked": (
             "Die Excel-Datei ist gerade in einem anderen Programm geöffnet. "
@@ -403,6 +414,9 @@ CATALOG: dict[str, dict[str, str]] = {
         "card.mails.imap_incomplete": "Mailbox not set up yet.",
         "card.mails.imap_password": "Mailbox {user} – enter the password (it is not saved).",
         "card.mails.imap_ready": "Mailbox {user} on {host}",
+        "card.mails.filter_subject": "only subjects with {entries}",
+        "card.mails.filter_sender": "only from {entries}",
+        "card.mails.filter_or": "or",
         "card.fields.none": "No fields yet.",
         "card.fields.count": "{count} field(s)",
         "card.fields.ok": "{count} – everything found in the sample mail",
@@ -452,8 +466,15 @@ CATALOG: dict[str, dict[str, str]] = {
         "mails.imap.password_hint": "not saved – enter it again after each start",
         "mails.imap.mailbox": "Mailbox folder",
         "mails.imap.mailbox_hint": "INBOX = inbox",
-        "mails.imap.sender_filter": "Only emails from",
-        "mails.imap.sender_filter_hint": "optional, e.g. form@school.org",
+        "mails.filter.title": "Which emails to transfer?",
+        "mails.filter.hint": (
+            "Leave empty = all emails. Other emails are simply left out (they do not show up as problems). "
+            "Separate several options with ; – upper/lower case does not matter."
+        ),
+        "mails.filter.subject": "Subject contains",
+        "mails.filter.subject_hint": "e.g. contact form",
+        "mails.filter.sender": "Sender contains",
+        "mails.filter.sender_hint": "address or name, e.g. form@school.org",
         "mails.imap.ssl": "Encrypted connection (SSL)",
         "mails.imap.port": "Port",
         "mails.imap.testing": "Connecting …",
@@ -573,6 +594,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "summary.failed": "{count} email(s) with problems – see the “{sheet}” sheet.",
         "summary.nothing_new": "No new emails found.",
         "summary.skipped": "Skipped {count} email(s) processed earlier.",
+        "summary.filtered": "{count} email(s) did not match the filter (subject/sender) and were left out.",
         "error.details": "Details",
         "error.workbook_locked": (
             "The Excel file is open in another program. Close Excel and click “Transfer now” "

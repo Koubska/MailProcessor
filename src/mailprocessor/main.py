@@ -118,6 +118,8 @@ def cli(
         typer.echo(
             f"seen={summary.seen} processed={summary.processed} "
             f"skipped={summary.skipped} failed={summary.failed}"
+            # Only with a filter, so the line stays the same for everyone else.
+            + (f" filtered={summary.filtered}" if summary.filtered else "")
         )
         if app_config.app.dry_run:
             typer.echo("Dry run: nothing was written.")

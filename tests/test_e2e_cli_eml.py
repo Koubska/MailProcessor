@@ -255,3 +255,19 @@ def test_cli_eml_incremental_run_appends_only_new_messages(tmp_path: Path) -> No
     phone_values = [data_sheet.cell(row=row_index, column=5).value for row_index in range(2, expected_total_rows + 1)]
     assert len(phone_values) == initial_messages + newly_added_messages
     assert len(set(phone_values)) == initial_messages + newly_added_messages
+
+
+def test_cli_reports_mails_left_out_by_the_filter(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _write_eml(inbox / "news.eml", "news@example.com", ["Unser Newsletter"])
+    config_path, rules_path = tmp_path / "config.toml", tmp_path / "rules.toml"
+    _write_config(config_path, db_path=tmp_path / "ledger.db", output_path=tmp_path / "out.xlsx", inbox=inbox)
+    with config_path.open("a", encoding="utf-8") as config_file:
+        config_file.write('\n[filter]\nsubject = "Kontaktformular"\n')
+    _write_rules(rules_path)
+
+    result = CliRunner().invoke(main_module.app, ["--config", str(config_path), "--rules", str(rules_path)])
+
+    assert result.exit_code == 0
+    assert "seen=0 processed=0 skipped=0 failed=0 filtered=1" in result.stdout

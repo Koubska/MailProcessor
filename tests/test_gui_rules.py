@@ -82,6 +82,9 @@ password = "plaintext-password"
 mailbox = "INBOX"
 use_ssl = true
 sender_filter = "schule@example.com"
+
+[filter]
+subject = ["Kontaktformular", "Anmeldung \\"neu\\""]
 """.strip()
 
     parsed = parse_config_text(config_text)
@@ -93,6 +96,18 @@ sender_filter = "schule@example.com"
     assert parsed.source.imap is not None
     parsed.source.imap.password = None
     assert reparsed == parsed
+    # The old IMAP-only sender filter is written as part of the filter for every source.
+    assert "sender_filter" not in rendered
+    assert reparsed.filter.sender == ["schule@example.com"]
+    assert reparsed.filter.subject == ["Kontaktformular", 'Anmeldung "neu"']
+
+
+def test_render_config_text_leaves_out_an_empty_filter() -> None:
+    config = parse_config_text(
+        '[app]\nsqlite_path = "l.db"\noutput_xlsx = "o.xlsx"\n[source]\ntype = "eml"\n[source.eml]\nfolder = "m"\n'
+    )
+
+    assert "[filter]" not in render_config_text(config)
 
 
 def test_render_rules_text_escapes_control_characters() -> None:
@@ -232,6 +247,25 @@ def test_open_in_default_app_uses_the_system_opener(monkeypatch, tmp_path: Path,
     open_in_default_app(tmp_path / "out.xlsx")
 
     assert calls == [[command, str(tmp_path / "out.xlsx")]]
+
+
+def test_run_summary_text_mentions_mails_left_out_by_the_filter() -> None:
+    summary = RunSummary(seen=1, processed=1, skipped=0, failed=0, filtered=4)
+
+    text = run_summary_text(summary, "out.xlsx", "fehler", dry_run=False, lang="de")
+
+    assert text == (
+        "1 neue Zeile(n) in out.xlsx eingetragen. "
+        "4 E-Mail(s) passten nicht zum Filter (Betreff/Absender) und wurden nicht beachtet."
+    )
+
+
+def test_run_summary_text_dry_run_mentions_the_filter() -> None:
+    summary = RunSummary(seen=0, processed=0, skipped=0, failed=0, filtered=2)
+
+    text = run_summary_text(summary, "out.xlsx", "fehler", dry_run=True, lang="en")
+
+    assert text.endswith("2 email(s) did not match the filter (subject/sender) and were left out.")
 
 
 def test_run_summary_text_mentions_a_stopped_run() -> None:

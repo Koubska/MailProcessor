@@ -10,7 +10,7 @@ from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from mailprocessor.config import ImapSourceConfig
+from mailprocessor.config import ImapSourceConfig, MailFilter
 from mailprocessor.errors import ImapLoginError, MissingPasswordError
 from mailprocessor.models import MailReadError, NormalizedMail
 from mailprocessor.sources.email_content import parse_message_bytes
@@ -111,13 +111,20 @@ def _quote_imap_string(value: str) -> str:
     return f'"{escaped}"'
 
 
-def _build_search_args(sender_filter: str | None, max_age_days: int, now_utc: datetime) -> tuple[str, ...]:
-    search_args: list[str] = []
-    if sender_filter is not None:
-        normalized_filter = sender_filter.strip()
-        if not normalized_filter:
-            raise ValueError("source.imap.sender_filter must not be empty when provided")
-        search_args.extend(["FROM", _quote_imap_string(normalized_filter)])
+def _any_of(key: str, entries: list[str]) -> list[str]:
+    """SEARCH criteria matching one of the entries: OR k "a" OR k "b" k "c". Empty if the server can't check them."""
+    # imaplib sends commands as ASCII. Mails are filtered again after fetching (processor.run_pipeline),
+    # so entries the server can't check are only left out of the search, never ignored.
+    if not entries or not all(entry.isascii() for entry in entries):
+        return []
+    criteria: list[str] = []
+    for entry in entries[:-1]:
+        criteria.extend(["OR", key, _quote_imap_string(entry)])
+    return [*criteria, key, _quote_imap_string(entries[-1])]
+
+
+def _build_search_args(mail_filter: MailFilter, max_age_days: int, now_utc: datetime) -> tuple[str, ...]:
+    search_args = [*_any_of("FROM", mail_filter.sender), *_any_of("SUBJECT", mail_filter.subject)]
     if max_age_days > 0:
         search_args.extend(["SINCE", _build_since_date_token(max_age_days, now_utc)])
     return tuple(search_args) if search_args else ("ALL",)
@@ -177,9 +184,13 @@ def iter_imap_messages(
     max_age_days: int = 0,
     now_utc: datetime | None = None,
     on_total: Callable[[int], None] | None = None,
+    mail_filter: MailFilter | None = None,
 ) -> Iterator[NormalizedMail | MailReadError]:
-    """Yield the matching messages; `on_total` receives their number before the first one is fetched."""
-    search_args = _build_search_args(config.sender_filter, max_age_days, now_utc or datetime.now(UTC))
+    """Yield the matching messages; `on_total` receives their number before the first one is fetched.
+
+    The server pre-selects by `mail_filter` where it can; the caller still has to check each mail against it.
+    """
+    search_args = _build_search_args(mail_filter or MailFilter(), max_age_days, now_utc or datetime.now(UTC))
     source_location = f"imap://{config.host}:{config.port}/{config.mailbox}"
     client = _connect_and_login(config, client_factory)
     try:

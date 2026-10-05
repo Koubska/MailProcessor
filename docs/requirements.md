@@ -48,7 +48,7 @@ Attachments are out of scope and are never processed or saved.
 ```text
 Mail source (.eml folder or IMAP mailbox)
        ↓
-Optional pre-filter (IMAP sender filter, max age)
+Optional pre-filter (subject, sender, max age)
        ↓
 Read message metadata and body locally
        ↓
@@ -85,7 +85,7 @@ A source yields one item per message: either a `NormalizedMail`, or a `MailReadE
 * The server must confirm `[READ-ONLY]` for the mailbox; otherwise the run aborts before any message is fetched.
 * Fetches use `BODY.PEEK[]` so the `\Seen` flag is never set, even on servers that ignore read-only mode.
 * All server access goes through an allow-list wrapper (`ReadOnlyImapClient`) that exposes no mutating commands.
-* Optional server-side sender filter (`FROM`) and age filter (`SINCE`).
+* The subject and sender filters (`FROM`, `SUBJECT`, ASCII entries only) and the age filter (`SINCE`) are passed to the server, so other mails are not downloaded.
 
 ### 5.3 Body extraction
 
@@ -99,7 +99,7 @@ A source yields one item per message: either a `NormalizedMail`, or a `MailReadE
 
 Supported today:
 
-* **Sender** (IMAP only): server-side `FROM` filter.
+* **Subject and sender** (`[filter]` in `config.toml`, GUI tab "E-Mails"): a mail is read only if its subject contains one of the `subject` entries and its From header (name or address) contains one of the `sender` entries; case and line breaks are ignored, an empty list matches every mail. Mails left out are not errors: they are counted as "filtered" in the run summary, not written to the ledger (so they are read once the filter changes), and their old rows on the error sheet are removed. Unreadable mails are always reported, because their subject and sender are unknown. The former IMAP-only `source.imap.sender_filter` is read as `filter.sender`.
 * **Age**: `max_age_days` / `--max-age-days`. Messages without a valid `Date` header are still processed rather than dropped silently.
 * **Volume**: `max_messages` limits how many *new* messages one run handles (already processed messages do not count).
 
@@ -273,7 +273,7 @@ Use only synthetic or anonymized emails. Never commit real email data.
 The following were part of the original Outlook-focused plan. They are not implemented; add them deliberately, following the rules above:
 
 * **Outlook desktop source** (Windows, `pywin32`/COM, existing Outlook profile, no credentials, read-only, `EntryID` as identity) implemented as another source that yields `NormalizedMail` / `MailReadError`.
-* Subject, date-range and unread filters.
+* Date-range and unread filters.
 * Parser version tracking in the ledger, so that parser changes can deliberately trigger reprocessing.
 * Date-typed columns.
 * Remembering GUI settings per user (e.g. under `%LOCALAPPDATA%`).

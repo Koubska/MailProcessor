@@ -13,12 +13,13 @@ from mailprocessor.config import (
     EmlSourceConfig,
     FieldRule,
     ImapSourceConfig,
+    MailFilter,
     ParsingRules,
     SourceConfig,
 )
 from mailprocessor.excel_writer import ERROR_COLUMNS, RECEIVED_COLUMN, TRANSFERRED_COLUMN
 from mailprocessor.ledger import Ledger
-from mailprocessor.models import NormalizedMail
+from mailprocessor.models import MailReadError, NormalizedMail
 from mailprocessor.processor import iter_source_messages, run_pipeline, start_over
 
 
@@ -53,13 +54,13 @@ def _build_rules() -> ParsingRules:
     )
 
 
-def _write_eml(path: Path, body_lines: list[str], message_id: str) -> None:
+def _write_eml(path: Path, body_lines: list[str], message_id: str, subject: str = "Schnuppernachmittag") -> None:
     path.write_text(
         "\n".join(
             [
                 f"Message-ID: <{message_id}>",
                 "From: Max Mustermann <max.mustermann@mail.com>",
-                "Subject: Schnuppernachmittag",
+                f"Subject: {subject}",
                 "Date: Mon, 23 Nov 2026 14:00:00 +0100",
                 "Content-Type: text/plain; charset=utf-8",
                 "",
@@ -175,6 +176,7 @@ def test_iter_source_messages_uses_imap_source(monkeypatch) -> None:
                 use_ssl=True,
             ),
         ),
+        filter=MailFilter(sender=["max.mustermann@mail.com"]),
     )
 
     expected = [
@@ -189,9 +191,11 @@ def test_iter_source_messages_uses_imap_source(monkeypatch) -> None:
         )
     ]
 
-    def fake_iter_imap_messages(_imap_cfg, max_age_days: int, now_utc: datetime, on_total=None):
+    def fake_iter_imap_messages(_imap_cfg, max_age_days: int, now_utc: datetime, on_total=None, mail_filter=None):
         assert max_age_days == 0
         assert now_utc.tzinfo is UTC
+        # The filter goes to the server too, so non-matching mails are not even downloaded.
+        assert mail_filter == MailFilter(sender=["max.mustermann@mail.com"])
         yield from expected
 
     monkeypatch.setattr("mailprocessor.processor.iter_imap_messages", fake_iter_imap_messages)
@@ -628,4 +632,65 @@ def test_fixed_mail_removes_its_error_row(tmp_path: Path) -> None:
     summary = run_pipeline(_build_config(tmp_path), _build_rules())
 
     assert summary.processed == 1
+
+def test_mails_not_matching_the_filter_are_left_out_without_an_error(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _write_eml(inbox / "form.eml", GOOD_BODY, "form@example.com", subject="Kontaktformular: Anmeldung")
+    _write_eml(inbox / "news.eml", ["Unser Newsletter im Oktober"], "news@example.com", subject="Newsletter")
+    config = _build_config(tmp_path)
+    config.filter = MailFilter(subject=["kontaktformular"])
+    calls: list[tuple[int, int]] = []
+
+    summary = run_pipeline(config, _build_rules(), progress=lambda current, total: calls.append((current, total)))
+
+    assert (summary.seen, summary.processed, summary.failed, summary.filtered) == (1, 1, 0, 1)
+    assert summary.problems == ()
+    assert calls[-1] == (2, 2)
+    workbook = load_workbook(tmp_path / "out" / "mail_export.xlsx")
+    assert workbook["daten"].max_row == 2
+    assert workbook["fehler"].max_row == 1
+
+
+def test_mails_left_out_by_the_filter_are_read_once_the_filter_changes(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _write_eml(inbox / "other.eml", GOOD_BODY, "other@example.com", subject="Rückfrage")
+    config = _build_config(tmp_path)
+    config.filter = MailFilter(subject=["Kontaktformular"])
+    assert run_pipeline(config, _build_rules()).filtered == 1
+
+    config.filter = MailFilter()
+    summary = run_pipeline(config, _build_rules())
+
+    assert (summary.processed, summary.filtered) == (1, 0)
+
+
+def test_unreadable_mails_are_reported_even_with_a_filter(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "inbox").mkdir()
+    config = _build_config(tmp_path)
+    config.filter = MailFilter(subject=["Kontaktformular"])
+    unreadable = MailReadError(source_type="eml", source_location="x", message_identity="file:x", reason="kaputt")
+
+    def source(*_args, **_kwargs):
+        yield unreadable
+
+    monkeypatch.setattr("mailprocessor.processor.iter_source_messages", source)
+
+    summary = run_pipeline(config, _build_rules())
+
+    # Subject and sender of an unreadable mail are unknown, so it may well be one of the wanted ones.
+    assert (summary.failed, summary.filtered) == (1, 0)
+
+
+def test_setting_a_filter_clears_old_error_rows_of_mails_it_leaves_out(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _write_eml(inbox / "news.eml", ["Unser Newsletter im Oktober"], "news@example.com", subject="Newsletter")
+    config = _build_config(tmp_path)
+    assert run_pipeline(config, _build_rules()).failed == 1
+
+    config.filter = MailFilter(subject=["Kontaktformular"])
+    run_pipeline(config, _build_rules())
+
     assert load_workbook(tmp_path / "out" / "mail_export.xlsx")["fehler"].max_row == 1

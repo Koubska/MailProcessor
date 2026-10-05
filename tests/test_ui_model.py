@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook
 
-from mailprocessor.config import FieldRule
+from mailprocessor.config import FieldRule, MailFilter
 from mailprocessor.gui import _default_config
 from mailprocessor.preview import RulePreview
 from mailprocessor.processor import Problem
@@ -67,6 +67,35 @@ def test_mails_status_for_folder(tmp_path: Path) -> None:
     (tmp_path / "mails" / "a.eml").write_text("x", encoding="utf-8")
     status = mails_status(values, tmp_path, False, "de")
     assert status.ok and status.text == "Ordner „mails“ – 1 E-Mail(s)"
+
+
+def test_filter_entries_are_typed_separated_by_semicolons() -> None:
+    values = {
+        **form_values(_default_config()),
+        "filter_subject": "Kontaktformular;  Anmeldung ;",
+        "filter_sender": "schule@example.com",
+    }
+
+    config, errors = config_from_form(values, "de")
+
+    assert errors == {}
+    assert config.filter == MailFilter(subject=["Kontaktformular", "Anmeldung"], sender=["schule@example.com"])
+    assert form_values(config)["filter_subject"] == "Kontaktformular; Anmeldung"
+    assert config_from_form(form_values(config), "de")[0] == config
+
+
+def test_mails_status_names_an_active_filter(tmp_path: Path) -> None:
+    (tmp_path / "mails").mkdir()
+    (tmp_path / "mails" / "a.eml").write_text("x", encoding="utf-8")
+    values = {**form_values(_default_config()), "eml_folder": "./mails", "filter_subject": "Kontakt; Anmeldung"}
+
+    assert mails_status(values, tmp_path, False, "de").text == (
+        "Ordner „mails“ – 1 E-Mail(s) · nur mit Betreff „Kontakt“ oder „Anmeldung“"
+    )
+    values = {**values, "source_type": "imap", "filter_subject": "", "filter_sender": "schule@example.com"}
+    assert mails_status(values, tmp_path, True, "en").text == (
+        "Mailbox user@example.com on imap.example.com · only from “schule@example.com”"
+    )
 
 
 def test_mails_status_for_imap_asks_for_the_password() -> None:

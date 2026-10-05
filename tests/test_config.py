@@ -85,7 +85,7 @@ sender_filter = "schule@example.com"
 
     assert config.source.type == "imap"
     assert config.source.imap is not None
-    assert config.source.imap.sender_filter == "schule@example.com"
+    assert config.filter.sender == ["schule@example.com"]
 
 
 def _write_minimal_config(path: Path, extra_app: str = "") -> None:

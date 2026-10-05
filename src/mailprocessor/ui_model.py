@@ -20,10 +20,11 @@ from mailprocessor.config import (
     EmlSourceConfig,
     FieldRule,
     ImapSourceConfig,
+    MailFilter,
     ParsingRules,
     SourceConfig,
 )
-from mailprocessor.gui import setting_path
+from mailprocessor.gui import setting_path, split_labels
 from mailprocessor.i18n import t
 from mailprocessor.preview import RulePreview, sample_files
 from mailprocessor.processor import Problem
@@ -46,7 +47,8 @@ def form_values(config: AppConfig) -> FormValues:
         "imap_username": imap.username,
         "imap_mailbox": imap.mailbox,
         "imap_use_ssl": imap.use_ssl,
-        "imap_sender_filter": imap.sender_filter or "",
+        "filter_subject": "; ".join(config.filter.subject),
+        "filter_sender": "; ".join(config.filter.sender),
         "output_xlsx": app.output_xlsx,
         "sheet_data": app.sheet_data,
         "sheet_errors": app.sheet_errors,
@@ -117,7 +119,6 @@ def config_from_form(values: FormValues, lang: str) -> tuple[AppConfig | None, d
             username=_text(values, "imap_username"),
             mailbox=_text(values, "imap_mailbox") or "INBOX",
             use_ssl=bool(values.get("imap_use_ssl", True)),
-            sender_filter=_text(values, "imap_sender_filter") or None,
         )
     try:
         config = AppConfig(
@@ -132,6 +133,10 @@ def config_from_form(values: FormValues, lang: str) -> tuple[AppConfig | None, d
                 max_age_days=max_age_days,
             ),
             source=SourceConfig(type=source_type, eml=eml, imap=imap),
+            filter=MailFilter(
+                subject=split_labels(_text(values, "filter_subject")),
+                sender=split_labels(_text(values, "filter_sender")),
+            ),
         )
     except ValidationError as exc:
         return None, {"_": exc.errors()[0]["msg"].removeprefix("Value error, ")}
@@ -159,6 +164,23 @@ def mail_count_in_folder(values: FormValues, config_dir: Path) -> int | None:
 
 
 def mails_status(values: FormValues, config_dir: Path, password_given: bool, lang: str) -> CardStatus:
+    status = _source_status(values, config_dir, password_given, lang)
+    if not status.ok:
+        return status
+    # Ready: say which mails count, so nobody wonders why some are not in the workbook.
+    or_word = f" {t('card.mails.filter_or', lang)} "
+    notes = [
+        t(key, lang).format(entries=or_word.join(_quote(entry, lang) for entry in entries))
+        for key, entries in (
+            ("card.mails.filter_subject", split_labels(_text(values, "filter_subject"))),
+            ("card.mails.filter_sender", split_labels(_text(values, "filter_sender"))),
+        )
+        if entries
+    ]
+    return CardStatus(status.ok, " · ".join([status.text, *notes]))
+
+
+def _source_status(values: FormValues, config_dir: Path, password_given: bool, lang: str) -> CardStatus:
     if _text(values, "source_type") == "imap":
         host, user = _text(values, "imap_host"), _text(values, "imap_username")
         if not host or not user:

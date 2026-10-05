@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from mailprocessor.config import ImapSourceConfig
+from mailprocessor.config import ImapSourceConfig, MailFilter
 from mailprocessor.models import MailReadError
 from mailprocessor.sources.imap_source import (
     ReadOnlyImapClient,
@@ -112,19 +112,44 @@ def test_iter_imap_messages_reads_messages_readonly() -> None:
 def test_iter_imap_messages_applies_sender_filter_to_search() -> None:
     payload = _build_raw_message("first@example.com", "Telefonnummer: 1234")
     fake_client = FakeImapClient(fetch_payloads={b"101": payload}, search_uids=b"101")
-    cfg = ImapSourceConfig(
-        host="imap.example.com",
-        port=993,
-        username="user@example.com",
-        password="plain-text-password",
-        mailbox="INBOX",
-        use_ssl=True,
-        sender_filter="schule@example.com",
+
+    list(
+        iter_imap_messages(
+            _cfg(),
+            client_factory=lambda _host, _port: fake_client,
+            mail_filter=MailFilter(sender=["schule@example.com"]),
+        )
     )
 
-    _messages = list(iter_imap_messages(cfg, client_factory=lambda _host, _port: fake_client))
-
     assert fake_client.search_calls == [("search", (None, "FROM", '"schule@example.com"'))]
+
+
+@pytest.mark.parametrize(
+    ("mail_filter", "expected"),
+    [
+        (
+            MailFilter(sender=["a@example.com", "b@example.com"]),
+            ("OR", "FROM", '"a@example.com"', "FROM", '"b@example.com"'),
+        ),
+        (
+            MailFilter(subject=["Kontakt", "Anmeldung", "Frage"]),
+            ("OR", "SUBJECT", '"Kontakt"', "OR", "SUBJECT", '"Anmeldung"', "SUBJECT", '"Frage"'),
+        ),
+        (
+            MailFilter(subject=["Kontakt"], sender=["schule@example.com"]),
+            ("FROM", '"schule@example.com"', "SUBJECT", '"Kontakt"'),
+        ),
+        # imaplib sends ASCII only; such entries are checked after fetching instead (run_pipeline filters every mail).
+        (MailFilter(subject=["Anmeldung für"], sender=["schule@example.com"]), ("FROM", '"schule@example.com"')),
+        (MailFilter(subject=["Kontakt", "Rückfrage"]), ("ALL",)),
+    ],
+)
+def test_filter_entries_are_searched_on_the_server(mail_filter: MailFilter, expected: tuple[str, ...]) -> None:
+    fake_client = FakeImapClient(search_uids=b"")
+
+    list(iter_imap_messages(_cfg(), client_factory=lambda _host, _port: fake_client, mail_filter=mail_filter))
+
+    assert fake_client.search_calls == [("search", (None, *expected))]
 
 
 def test_iter_imap_messages_applies_max_age_days_filter_to_search() -> None:
@@ -193,24 +218,6 @@ def test_iter_imap_messages_raises_on_search_error() -> None:
         list(iter_imap_messages(cfg, client_factory=lambda _host, _port: fake_client))
 
 
-def test_iter_imap_messages_rejects_blank_sender_filter() -> None:
-    fake_client = FakeImapClient(
-        fetch_payloads={b"101": _build_raw_message("first@example.com", "Telefonnummer: 1234")}
-    )
-    cfg = ImapSourceConfig(
-        host="imap.example.com",
-        port=993,
-        username="user@example.com",
-        password="plain-text-password",
-        mailbox="INBOX",
-        use_ssl=True,
-        sender_filter="   ",
-    )
-
-    with pytest.raises(ValueError, match="sender_filter must not be empty"):
-        list(iter_imap_messages(cfg, client_factory=lambda _host, _port: fake_client))
-
-
 def _cfg(**overrides) -> ImapSourceConfig:
     values = dict(host="imap.example.com", port=993, username="user@example.com", password="pw", use_ssl=True)
     values.update(overrides)
@@ -256,7 +263,11 @@ def test_missing_password_is_rejected() -> None:
 def test_sender_filter_quotes_are_escaped() -> None:
     fake_client = FakeImapClient(fetch_payloads={b"101": _build_raw_message("a@example.com", "x")}, search_uids=b"101")
 
-    list(iter_imap_messages(_cfg(sender_filter='a"b'), client_factory=lambda _host, _port: fake_client))
+    list(
+        iter_imap_messages(
+            _cfg(), client_factory=lambda _host, _port: fake_client, mail_filter=MailFilter(sender=['a"b'])
+        )
+    )
 
     assert fake_client.search_calls == [("search", (None, "FROM", '"a\\"b"'))]
 

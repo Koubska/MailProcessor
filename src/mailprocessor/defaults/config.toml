@@ -24,5 +24,9 @@ username = "user@example.com"
 # No password here: set MAILPROCESSOR_IMAP_PASSWORD or enter it when prompted.
 mailbox = "INBOX"
 use_ssl = true # false = plain connection upgraded via STARTTLS (required)
-# Optional server-side filter: only messages with a matching From header are fetched
-# sender_filter = "schule@example.com"
+
+# Optional: only mails whose subject / From header (name or address) contains one of the entries.
+# Case does not matter; other mails are left out without an error. Both lists must match.
+# [filter]
+# subject = ["Kontaktformular"]
+# sender = ["schule@example.com"]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import tomllib
+from collections.abc import Callable
 from importlib import resources
 from pathlib import Path
 from typing import Literal
@@ -44,7 +45,6 @@ class ImapSourceConfig(BaseModel):
     password: str | None = None
     mailbox: str = "INBOX"
     use_ssl: bool = True
-    sender_filter: str | None = None
 
 
 class SourceConfig(BaseModel):
@@ -61,9 +61,69 @@ class SourceConfig(BaseModel):
         return self
 
 
+def _collapse_spaces(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _text_entries(value: object, clean: Callable[[str], str] = str.strip) -> object:
+    """Accept a single text or a list of texts; clean each and drop the empty ones."""
+    if isinstance(value, str):
+        value = [value]
+    if isinstance(value, list):
+        cleaned = (clean(item) for item in value if isinstance(item, str))
+        return [item for item in cleaned if item]
+    return value
+
+
+class MailFilter(BaseModel):
+    """Which mails a run reads at all. Others are left out without an error and are read once the filter changes.
+
+    Each list matches if the mail's subject (or From header: name and address) contains one of its entries,
+    ignoring case and line breaks. An empty list matches every mail; both lists must match.
+    """
+
+    subject: list[str] = Field(default_factory=list)
+    sender: list[str] = Field(default_factory=list)
+
+    @field_validator("subject", "sender", mode="before")
+    @classmethod
+    def entries_as_list(cls, value: object) -> object:
+        return _text_entries(value, _collapse_spaces)
+
+    @property
+    def active(self) -> bool:
+        return bool(self.subject or self.sender)
+
+    def matches(self, subject: str, sender: str) -> bool:
+        return _contains_any(subject, self.subject) and _contains_any(sender, self.sender)
+
+
+def _contains_any(text: str, entries: list[str]) -> bool:
+    if not entries:
+        return True
+    folded = _collapse_spaces(text).casefold()
+    return any(entry.casefold() in folded for entry in entries)
+
+
 class AppConfig(BaseModel):
     app: AppSection
     source: SourceConfig
+    filter: MailFilter = Field(default_factory=MailFilter)
+
+    @model_validator(mode="before")
+    @classmethod
+    def move_old_sender_filter(cls, data: object) -> object:
+        """Before the filter existed, IMAP had its own `source.imap.sender_filter`; it is now `filter.sender`."""
+        # Only raw data from a file has it; already built sections are passed through.
+        source = data.get("source") if isinstance(data, dict) else None
+        imap = source.get("imap") if isinstance(source, dict) else None
+        if not isinstance(imap, dict) or "sender_filter" not in imap:
+            return data
+        old = imap["sender_filter"]
+        source = {**source, "imap": {key: value for key, value in imap.items() if key != "sender_filter"}}
+        mail_filter = dict(data.get("filter") or {})
+        mail_filter.setdefault("sender", old)
+        return {**data, "source": source, "filter": mail_filter}
 
 
 class FieldRule(BaseModel):
@@ -81,12 +141,7 @@ class FieldRule(BaseModel):
     @field_validator("label", mode="before")
     @classmethod
     def label_as_list(cls, value: object) -> object:
-        """Accept a single label or a list; drop empty entries."""
-        if isinstance(value, str):
-            value = [value]
-        if isinstance(value, list):
-            return [item.strip() for item in value if isinstance(item, str) and item.strip()]
-        return value
+        return _text_entries(value)
 
     @model_validator(mode="after")
     def validate_inputs_for_type(self) -> FieldRule:
