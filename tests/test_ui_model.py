@@ -8,12 +8,14 @@ from mailprocessor.gui import _default_config
 from mailprocessor.preview import RulePreview
 from mailprocessor.processor import Problem
 from mailprocessor.ui_model import (
+    RuleList,
     config_from_form,
     excel_status,
     fields_status,
     form_values,
     mails_status,
     problem_text,
+    shortcuts,
 )
 
 
@@ -109,3 +111,95 @@ def test_problem_text() -> None:
     assert problem_text(missing, "de") == "nicht gefunden: „Tel“, „Kurs“"
     assert problem_text(unreadable, "de") == "E-Mail konnte nicht gelesen werden"
     assert problem_text(Problem(name="c", reason="Internal parser error", body="x"), "en") == "Internal parser error"
+
+
+def _rule(column: str, label: str | None = None) -> FieldRule:
+    return FieldRule(column=column, type="label", label=label or column)
+
+
+def test_rule_list_add_validates_like_the_rules_file() -> None:
+    rules = RuleList([_rule("Name")])
+
+    assert rules.add(_rule("Kurs")) == 1
+    with pytest.raises(ValueError, match="Duplicate"):
+        rules.add(_rule("Kurs"))
+    with pytest.raises(ValueError, match="reserved"):
+        rules.add(_rule("E-Mail-Inhalt"))
+    assert [rule.column for rule in rules] == ["Name", "Kurs"]
+
+
+def test_rule_list_replace_reports_changes_and_keeps_invalid_out() -> None:
+    rules = RuleList([_rule("Name"), _rule("Kurs")])
+
+    assert rules.replace(0, _rule("Name")) is False
+    assert rules.replace(0, _rule("Name", "Vorname:")) is True
+    with pytest.raises(ValueError):
+        rules.replace(0, _rule("Kurs"))
+    assert rules[0].label == ["Vorname:"]
+
+
+def test_rule_list_remove_can_be_undone_once() -> None:
+    rules = RuleList([_rule("Name"), _rule("Kurs"), _rule("Zeit")])
+
+    removed = rules.remove(1)
+
+    assert removed.column == "Kurs"
+    assert [rule.column for rule in rules] == ["Name", "Zeit"]
+    assert rules.can_undo
+    assert rules.undo_remove() == 1
+    assert [rule.column for rule in rules] == ["Name", "Kurs", "Zeit"]
+    assert rules.undo_remove() is None
+
+
+def test_rule_list_other_changes_end_the_undo() -> None:
+    rules = RuleList([_rule("Name"), _rule("Kurs")])
+    rules.remove(0)
+    rules.add(_rule("Zeit"))
+
+    assert not rules.can_undo
+    assert rules.undo_remove() is None
+
+
+def test_rule_list_undo_does_not_create_a_duplicate() -> None:
+    rules = RuleList([_rule("Name"), _rule("Kurs")])
+    rules.remove(1)
+    rules.replace(0, _rule("Kurs"))  # the remaining field now uses the removed name
+
+    assert rules.undo_remove() is None
+    assert [rule.column for rule in rules] == ["Kurs"]
+
+
+def test_rule_list_move() -> None:
+    rules = RuleList([_rule("A"), _rule("B"), _rule("C")])
+
+    assert rules.move(0, 1) == 1
+    assert [rule.column for rule in rules] == ["B", "A", "C"]
+    assert rules.move(0, -1) is None
+    assert rules.move(2, 1) is None
+    assert [rule.column for rule in rules] == ["B", "A", "C"]
+
+
+def test_rule_list_columns_and_parsing_rules() -> None:
+    rules = RuleList([_rule("A"), _rule("B")])
+
+    assert rules.columns(except_index=0) == ["B"]
+    assert rules.parsing_rules().fields == rules.rules
+    assert not RuleList([])
+
+
+@pytest.mark.parametrize(
+    ("platform", "lang", "labels", "run_sequence"),
+    [
+        ("darwin", "de", ("⌘↩", "⇧⌘↩", "⌘E"), "<Command-Return>"),
+        ("win32", "de", ("Strg+Enter", "Strg+Umschalt+Enter", "Strg+E"), "<Control-Return>"),
+        ("linux", "en", ("Ctrl+Enter", "Ctrl+Shift+Enter", "Ctrl+E"), "<Control-Return>"),
+    ],
+)
+def test_shortcuts_follow_the_platform(platform: str, lang: str, labels: tuple[str, ...], run_sequence: str) -> None:
+    result = shortcuts(platform, lang)
+
+    assert tuple(result[action].label for action in ("run", "test_run", "open_excel")) == labels
+    assert result["run"].sequences == (run_sequence,)
+    assert result["test_run"].sequences[0].endswith("Shift-Return>")
+    # Caps Lock must not break the letter shortcut.
+    assert {sequence[-2] for sequence in result["open_excel"].sequences} == {"e", "E"}

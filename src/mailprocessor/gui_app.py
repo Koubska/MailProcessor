@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import sys
 import threading
 import time
 import tkinter as tk
@@ -52,6 +53,7 @@ from mailprocessor.sources.imap_source import check_imap_connection
 from mailprocessor.ui_model import (
     DEFAULT_IMAP_PORTS,
     CardStatus,
+    RuleList,
     config_from_form,
     excel_status,
     fields_status,
@@ -59,9 +61,12 @@ from mailprocessor.ui_model import (
     mail_count_in_folder,
     mails_status,
     problem_text,
+    shortcuts,
 )
+from mailprocessor.window_state import STATE_FILE_NAME, WindowState, fit_geometry, load_window_state, save_window_state
 
 GREEN, RED, AMBER, GRAY = "#15803d", "#b91c1c", "#b45309", "gray"
+TOOLTIP_BACKGROUND, TOOLTIP_FOREGROUND = "#fffbe6", "#1f2937"
 HIGHLIGHT = "#fde68a"
 LANGUAGES = {"de": "Deutsch", "en": "English"}
 # Which tab holds which input, to jump to the first problem.
@@ -69,6 +74,48 @@ INPUT_TABS = {
     **dict.fromkeys(("eml_folder", "imap_host", "imap_port", "imap_username"), 1),
     **dict.fromkeys(("output_xlsx", "sheet_data", "sheet_errors", "sqlite_path", "max_age_days", "max_messages"), 3),
 }
+
+
+class Tooltip:
+    """Hover hint that appears after a short delay. The text is looked up when shown, so it follows the language."""
+
+    DELAY_MS = 600
+
+    def __init__(self, widget: tk.Widget, text: Callable[[], str]) -> None:
+        self.widget = widget
+        self.text = text
+        self.window: tk.Toplevel | None = None
+        self.job: str | None = None
+        widget.bind("<Enter>", lambda _event: self._schedule(), add="+")
+        widget.bind("<Leave>", lambda _event: self.hide(), add="+")
+        widget.bind("<ButtonPress>", lambda _event: self.hide(), add="+")
+
+    def _schedule(self) -> None:
+        self._cancel()
+        self.job = self.widget.after(self.DELAY_MS, self._show)
+
+    def _cancel(self) -> None:
+        if self.job is not None:
+            self.widget.after_cancel(self.job)
+            self.job = None
+
+    def _show(self) -> None:
+        self.job = None
+        text = self.text()
+        if not text or self.window is not None:
+            return
+        x = self.widget.winfo_rootx() + 12
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
+        self.window = tk.Toplevel(self.widget)
+        self.window.wm_overrideredirect(True)
+        self.window.wm_geometry(f"+{x}+{y}")
+        ttk.Label(self.window, text=text, style="Tooltip.TLabel", wraplength=360, justify=tk.LEFT).pack()
+
+    def hide(self) -> None:
+        self._cancel()
+        if self.window is not None:
+            self.window.destroy()
+            self.window = None
 
 
 class App:
@@ -82,7 +129,9 @@ class App:
         self.form: dict[str, tk.Variable] = {}
         self.error_labels: dict[str, ttk.Label] = {}
         self.translated: list[tuple[tk.Widget, str, str]] = []
-        self.fields: list[FieldRule] = []
+        self.fields = RuleList([])
+        self.shortcuts = shortcuts(sys.platform, self.lang)
+        self.window_state_path = self.config_dir / "data" / STATE_FILE_NAME
         self.saved_config_text = ""
         self.form_valid = True
         self.save_job: str | None = None
@@ -109,7 +158,9 @@ class App:
         self._setup_window()
         self._setup_styles()
         self._build()
+        self._bind_shortcuts()
         self._load()
+        self._restore_window_state()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     # ------------------------------------------------------------------ basics
@@ -130,9 +181,29 @@ class App:
     def hint(self, parent, key: str, wrap: int = 560) -> ttk.Label:
         return self.label(parent, key, style="Hint.TLabel", wraplength=wrap, justify=tk.LEFT)
 
-    def button(self, parent, key: str, command: Callable[[], None], style: str | None = None, **options) -> ttk.Button:
+    def button(
+        self,
+        parent,
+        key: str,
+        command: Callable[[], None],
+        style: str | None = None,
+        tip: str | None = None,
+        shortcut: str | None = None,
+        **options,
+    ) -> ttk.Button:
         widget = ttk.Button(parent, command=command, style=style or "TButton", **options)
+        if tip is not None:
+            self.tip(widget, tip, shortcut)
         return self._translate(widget, key)
+
+    def tip(self, widget: tk.Widget, key: str, shortcut: str | None = None) -> None:
+        """Attach a hover hint; `shortcut` names an action in `self.shortcuts` whose keys are appended."""
+
+        def text() -> str:
+            hint = self.tr(key)
+            return f"{hint} ({self.shortcuts[shortcut].label})" if shortcut else hint
+
+        Tooltip(widget, text)
 
     def var(self, key: str, value: str | bool) -> tk.Variable:
         variable = tk.BooleanVar(value=value) if isinstance(value, bool) else tk.StringVar(value=value)
@@ -180,6 +251,14 @@ class App:
         style.configure("CardIcon.TLabel", font=self.heading_font)
         style.configure("Heading.TRadiobutton", font=self.heading_font)
         style.configure("TNotebook.Tab", padding=(14, 6))
+        style.configure(
+            "Tooltip.TLabel",
+            background=TOOLTIP_BACKGROUND,
+            foreground=TOOLTIP_FOREGROUND,
+            relief="solid",
+            borderwidth=1,
+            padding=(8, 4),
+        )
 
     # ------------------------------------------------------------------ layout
 
@@ -197,6 +276,8 @@ class App:
         footer.pack(fill=tk.X, pady=(8, 0))
         self.save_status = ttk.Label(footer, style="Hint.TLabel")
         self.save_status.pack(side=tk.LEFT)
+        # Shown only right after a field was deleted.
+        self.undo_button = self.button(footer, "button.undo", self.undo_remove_field, tip="tip.undo")
 
         self._build_start_tab(self.tabs[0])
         self._build_mails_tab(self.tabs[1])
@@ -219,27 +300,36 @@ class App:
         cards.columnconfigure(2, weight=1)
         self.cards: dict[str, tuple[ttk.Label, ttk.Label]] = {}
         card_rows = (
-            ("mails", "card.mails.title", "button.change", lambda: self.notebook.select(1)),
-            ("fields", "card.fields.title", "button.edit", lambda: self.notebook.select(2)),
-            ("excel", "card.excel.title", "button.open_excel", self.open_output),
+            ("mails", "card.mails.title", "button.change", lambda: self.notebook.select(1), "tip.card_mails", None),
+            ("fields", "card.fields.title", "button.edit", lambda: self.notebook.select(2), "tip.card_fields", None),
+            ("excel", "card.excel.title", "button.open_excel", self.open_output, "tip.open_excel", "open_excel"),
         )
-        for row, (name, title_key, action_key, action) in enumerate(card_rows):
+        for row, (name, title_key, action_key, action, tip, shortcut) in enumerate(card_rows):
             icon = ttk.Label(cards, style="CardIcon.TLabel", width=2)
             icon.grid(row=row, column=0, sticky="w", pady=6)
             self.label(cards, title_key, style="Bold.TLabel").grid(row=row, column=1, sticky="w", padx=(4, 16))
             text = ttk.Label(cards, wraplength=640, justify=tk.LEFT)
             text.grid(row=row, column=2, sticky="w")
-            self.button(cards, action_key, action).grid(row=row, column=3, sticky="e", padx=(12, 0))
+            self.button(cards, action_key, action, tip=tip, shortcut=shortcut).grid(
+                row=row, column=3, sticky="e", padx=(12, 0)
+            )
             self.cards[name] = (icon, text)
 
         ttk.Separator(tab).pack(fill=tk.X, pady=16)
         actions = ttk.Frame(tab)
         actions.pack(fill=tk.X)
         self.run_button = self.button(
-            actions, "button.run", lambda: self.execute_run(dry_run=False), style="Big.TButton"
+            actions,
+            "button.run",
+            lambda: self.execute_run(dry_run=False),
+            style="Big.TButton",
+            tip="tip.run",
+            shortcut="run",
         )
         self.run_button.pack(side=tk.LEFT)
-        self.test_run_button = self.button(actions, "button.test_run", lambda: self.execute_run(dry_run=True))
+        self.test_run_button = self.button(
+            actions, "button.test_run", lambda: self.execute_run(dry_run=True), tip="tip.test_run", shortcut="test_run"
+        )
         self.test_run_button.pack(side=tk.LEFT, padx=(12, 0))
         self.hint(tab, "start.test_run_hint", wrap=760).pack(anchor="w", pady=(6, 0))
 
@@ -248,7 +338,7 @@ class App:
         self.progress_bar.pack(side=tk.LEFT)
         self.progress_label = ttk.Label(self.progress_row)
         self.progress_label.pack(side=tk.LEFT, padx=(12, 0))
-        self.stop_button = self.button(self.progress_row, "button.stop", self.stop_run)
+        self.stop_button = self.button(self.progress_row, "button.stop", self.stop_run, tip="tip.stop")
         self.stop_button.pack(side=tk.LEFT, padx=(12, 0))
 
         self.result_label = ttk.Label(tab, wraplength=900, justify=tk.LEFT, font=self.bold_font)
@@ -272,15 +362,18 @@ class App:
         self.problems_view.bind("<Double-1>", lambda _event: self.open_problem())
         self.problems_view.bind("<Return>", lambda _event: self.open_problem())
         self.problems_view.bind("<<TreeviewSelect>>", lambda _event: self._update_problem_button())
-        self.open_problem_button = self.button(self.problems_frame, "button.open_problem", self.open_problem)
+        self.open_problem_button = self.button(
+            self.problems_frame, "button.open_problem", self.open_problem, tip="tip.open_problem"
+        )
         self.open_problem_button.pack(anchor="w", pady=(6, 0))
 
         details_row = ttk.Frame(tab)
         details_row.pack(fill=tk.X, pady=(12, 0))
         self.details_row = details_row
         self.details_button = ttk.Button(details_row, command=self.toggle_details)
+        self.tip(self.details_button, "tip.details")
         self.details_button.pack(side=tk.LEFT)
-        self.button(details_row, "button.open_log", self.open_log).pack(side=tk.LEFT, padx=(8, 0))
+        self.button(details_row, "button.open_log", self.open_log, tip="tip.open_log").pack(side=tk.LEFT, padx=(8, 0))
         self.details_frame = ttk.Frame(tab)
         self.log_text = tk.Text(self.details_frame, height=10, wrap="word", state=tk.DISABLED)
         log_scroll = ttk.Scrollbar(self.details_frame, orient=tk.VERTICAL, command=self.log_text.yview)
@@ -308,7 +401,7 @@ class App:
         self.button(self.eml_frame, "button.browse", self.choose_eml_folder).grid(
             row=1, column=1, padx=(8, 0), pady=(6, 0)
         )
-        self.button(self.eml_frame, "button.open_folder", self.open_eml_folder).grid(
+        self.button(self.eml_frame, "button.open_folder", self.open_eml_folder, tip="tip.open_folder").grid(
             row=1, column=2, padx=(8, 0), pady=(6, 0)
         )
         self.eml_count = ttk.Label(self.eml_frame)
@@ -354,12 +447,15 @@ class App:
         security.grid(row=12, column=1, columnspan=2, sticky="w", pady=(8, 0))
         ssl_box = ttk.Checkbutton(security, variable=self.form["imap_use_ssl"], command=self.on_ssl_toggled)
         self._translate(ssl_box, "mails.imap.ssl").pack(side=tk.LEFT)
+        self.tip(ssl_box, "tip.ssl")
         self.label(security, "mails.imap.port").pack(side=tk.LEFT, padx=(16, 6))
         self.entry(security, "imap_port", width=7).pack(side=tk.LEFT)
         self.error_label(self.imap_frame, "imap_port").grid(row=13, column=1, columnspan=2, sticky="w")
         test_row = ttk.Frame(self.imap_frame)
         test_row.grid(row=14, column=1, columnspan=2, sticky="w", pady=(12, 0))
-        self.connection_button = self.button(test_row, "button.test_connection", self.test_connection)
+        self.connection_button = self.button(
+            test_row, "button.test_connection", self.test_connection, tip="tip.test_connection"
+        )
         self.connection_button.pack(side=tk.LEFT)
         self.connection_result = ttk.Label(test_row, wraplength=560, justify=tk.LEFT)
         self.connection_result.pack(side=tk.LEFT, padx=(12, 0))
@@ -395,10 +491,14 @@ class App:
 
         list_buttons = ttk.Frame(rules_pane)
         list_buttons.pack(fill=tk.X, pady=(6, 12))
-        self.button(list_buttons, "button.field_new", self.new_field).pack(side=tk.LEFT)
-        self.button(list_buttons, "button.field_remove", self.remove_field).pack(side=tk.LEFT, padx=(8, 0))
-        self.button(list_buttons, "button.field_up", lambda: self.move_field(-1)).pack(side=tk.LEFT, padx=(8, 0))
-        self.button(list_buttons, "button.field_down", lambda: self.move_field(1)).pack(side=tk.LEFT, padx=(8, 0))
+        list_actions = (
+            ("button.field_new", self.new_field, "tip.field_new"),
+            ("button.field_remove", self.remove_field, "tip.field_remove"),
+            ("button.field_up", lambda: self.move_field(-1), "tip.field_move"),
+            ("button.field_down", lambda: self.move_field(1), "tip.field_move"),
+        )
+        for position, (key, command, tip) in enumerate(list_actions):
+            self.button(list_buttons, key, command, tip=tip).pack(side=tk.LEFT, padx=(8 if position else 0, 0))
 
         self.editor = ttk.LabelFrame(rules_pane, padding=10)
         self.editor.pack(fill=tk.X)
@@ -413,8 +513,10 @@ class App:
         self.column_entry.grid(row=0, column=1, sticky="ew")
         required_box = ttk.Checkbutton(self.editor, variable=self.field_required)
         self._translate(required_box, "label.field_required").grid(row=0, column=2, sticky="w", padx=(12, 0))
+        self.tip(required_box, "tip.field_required")
         self.label(self.editor, "label.field_type").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(8, 0))
         self.type_box = ttk.Combobox(self.editor, state="readonly")
+        self.tip(self.type_box, "tip.field_type")
         self.type_box.grid(row=1, column=1, sticky="ew", pady=(8, 0))
         self.type_box.bind("<<ComboboxSelected>>", lambda _event: self.on_type_selected())
 
@@ -446,22 +548,28 @@ class App:
         editor_buttons.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         self.add_button = self.button(editor_buttons, "button.field_add", self.add_field)
         self.cancel_new_button = self.button(editor_buttons, "button.cancel", self.cancel_new_field)
-        self.as_regex_button = self.button(editor_buttons, "button.as_regex", self.convert_to_regex)
+        self.as_regex_button = self.button(editor_buttons, "button.as_regex", self.convert_to_regex, tip="tip.as_regex")
 
         # Sample mail
         self.label(sample_pane, "preview.title", style="Heading.TLabel").pack(anchor="w")
         nav = ttk.Frame(sample_pane)
         nav.pack(fill=tk.X, pady=(6, 0))
         self.prev_button = ttk.Button(nav, text="◀", width=3, command=lambda: self.step_sample(-1))
+        self.tip(self.prev_button, "tip.sample_previous")
         self.prev_button.pack(side=tk.LEFT)
         self.next_button = ttk.Button(nav, text="▶", width=3, command=lambda: self.step_sample(1))
+        self.tip(self.next_button, "tip.sample_next")
         self.next_button.pack(side=tk.LEFT, padx=(4, 0))
         self.sample_title = ttk.Label(nav)
         self.sample_title.pack(side=tk.LEFT, padx=(8, 0))
         sample_actions = ttk.Frame(sample_pane)
         sample_actions.pack(fill=tk.X, pady=(6, 6))
-        self.button(sample_actions, "button.sample_load", self.choose_sample_file).pack(side=tk.LEFT)
-        self.button(sample_actions, "button.sample_paste", self.paste_sample).pack(side=tk.LEFT, padx=(8, 0))
+        self.button(sample_actions, "button.sample_load", self.choose_sample_file, tip="tip.sample_load").pack(
+            side=tk.LEFT
+        )
+        self.button(sample_actions, "button.sample_paste", self.paste_sample, tip="tip.sample_paste").pack(
+            side=tk.LEFT, padx=(8, 0)
+        )
         self.sample_summary = ttk.Label(sample_pane, wraplength=440, justify=tk.LEFT, font=self.bold_font)
         self.sample_summary.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
         self.hint(sample_pane, "preview.header_note", wrap=440).pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
@@ -510,7 +618,7 @@ class App:
         self.start_over_button = self.button(maintenance, "button.start_over", self.on_start_over)
         self.start_over_button.grid(row=0, column=0, sticky="w")
         self.hint(maintenance, "settings.start_over_hint", wrap=420).grid(row=1, column=0, sticky="w", pady=(2, 10))
-        self.button(maintenance, "button.open_log", self.open_log).grid(row=2, column=0, sticky="w")
+        self.button(maintenance, "button.open_log", self.open_log, tip="tip.open_log").grid(row=2, column=0, sticky="w")
         self.button(maintenance, "button.open_config_folder", lambda: self.open_path(self.config_dir)).grid(
             row=3, column=0, sticky="w", pady=(6, 0)
         )
@@ -559,9 +667,9 @@ class App:
                 self.form[key].set(value)
         try:
             rules_text = _read_text_or_empty(self.rules_path)
-            self.fields = parse_rules_text(rules_text) if rules_text.strip() else []
+            self.fields = RuleList(parse_rules_text(rules_text) if rules_text.strip() else [])
         except (OSError, ValueError) as exc:
-            self.fields, problem = [], str(exc)
+            self.fields, problem = RuleList([]), str(exc)
         self.loading = False
         # Only a real change rewrites config.toml (opening the app keeps comments in a hand-edited file).
         self.saved_config_text = render_config_text(config) if not problem else ""
@@ -614,7 +722,7 @@ class App:
 
     def save_rules(self) -> None:
         try:
-            self.rules_path.write_text(render_rules_text(self.fields), encoding="utf-8")
+            self.rules_path.write_text(render_rules_text(self.fields.rules), encoding="utf-8")
             self.save_status.configure(text=self.tr("status.saved"), foreground=GRAY)
         except OSError as exc:
             self.save_status.configure(text=f"⚠ {friendly_error(exc, self.lang)}", foreground=RED)
@@ -639,18 +747,46 @@ class App:
     def on_close(self) -> None:
         if self.running and not messagebox.askyesno(self.tr("app.title"), self.tr("confirm.close_running")):
             return
-        self.cancel_event.set()
         if not self.flush_saves() and not messagebox.askyesno(self.tr("app.title"), self.tr("confirm.close_invalid")):
             self.jump_to_first_error()
             return
+        self.cancel_event.set()  # only now: the window really closes
+        save_window_state(
+            self.window_state_path, WindowState(geometry=self.root.geometry(), tab=self.notebook.index("current"))
+        )
         self.package_logger.removeHandler(self.log_handler)
         self.root.destroy()
+
+    def _restore_window_state(self) -> None:
+        state = load_window_state(self.window_state_path)
+        geometry = fit_geometry(state.geometry, self.root.winfo_screenwidth(), self.root.winfo_screenheight())
+        if geometry is not None:
+            self.root.geometry(geometry)
+        if 0 <= state.tab < len(self.tabs):
+            self.notebook.select(state.tab)
+
+    def _bind_shortcuts(self) -> None:
+        actions = {
+            "run": lambda: self.execute_run(dry_run=False),
+            "test_run": lambda: self.execute_run(dry_run=True),
+            "open_excel": self.open_output,
+        }
+        for name, action in actions.items():
+            for sequence in self.shortcuts[name].sequences:
+                self.root.bind(sequence, lambda event, action=action: self._on_shortcut(event, action))
+
+    def _on_shortcut(self, event: tk.Event, action: Callable[[], None]) -> str:
+        # In the sample mail, Enter belongs to the text (it already inserted a line break); do not run as well.
+        if event.widget is not self.sample_text:
+            action()
+        return "break"
 
     # ------------------------------------------------------------------ language
 
     def on_language_selected(self) -> None:
         names = {name: code for code, name in LANGUAGES.items()}
         self.lang = names.get(self.language_box.get(), "de")
+        self.shortcuts = shortcuts(sys.platform, self.lang)
         self.apply_language()
 
     def apply_language(self) -> None:
@@ -744,7 +880,7 @@ class App:
             SampleMail(title=problem.name, body=normalize_body(problem.body), header_text=problem.header_text)
         )
         self.notebook.select(2)
-        columns = [rule.column for rule in self.fields]
+        columns = self.fields.columns()
         missing = [column for column in problem.missing if column in columns]
         if missing:
             self.flush_editor()
@@ -783,7 +919,7 @@ class App:
             return
         try:
             app_config = load_app_config(self.cfg_path)
-            parsing_rules = ParsingRules(fields=self.fields)
+            parsing_rules = self.fields.parsing_rules()
         except (OSError, ValueError) as exc:
             messagebox.showerror(self.tr("app.title"), friendly_error(exc, self.lang))
             return
@@ -1089,7 +1225,7 @@ class App:
             end=values["end"],
             pattern=values["pattern"],
             required=self.field_required.get(),
-            other_columns=None if for_preview else [rule.column for i, rule in enumerate(self.fields) if i != index],
+            other_columns=None if for_preview else self.fields.columns(except_index=index),
             lang=self.lang,
         )
 
@@ -1109,14 +1245,13 @@ class App:
         if self.editor_mode != "edit" or index is None or index >= len(self.fields):
             return
         try:
-            rule = self.editor_rule()
-            ParsingRules(fields=[*self.fields[:index], rule, *self.fields[index + 1 :]])
+            changed = self.fields.replace(index, self.editor_rule())
         except ValueError:
             return  # the problem is shown below the editor; the list keeps the last valid version
-        if rule == self.fields[index]:
+        if not changed:
             return
-        self.fields[index] = rule
-        self.fields_view.item(str(index), values=self._row_values(rule))
+        self._update_undo_button()
+        self.fields_view.item(str(index), values=self._row_values(self.fields[index]))
         self.save_rules()
         self.schedule_preview()
 
@@ -1135,15 +1270,15 @@ class App:
     def add_field(self) -> None:
         try:
             rule = self.editor_rule()
-            ParsingRules(fields=[*self.fields, rule])
+            index = self.fields.add(rule)
         except ValueError as exc:
             messagebox.showerror(self.tr("app.title"), str(exc))
             return
-        self.fields.append(rule)
         self.editing_index = None
+        self._update_undo_button()
         self.save_rules()
         self.refresh_fields_view()
-        self.select_field(len(self.fields) - 1)
+        self.select_field(index)
         self.save_status.configure(text=self.tr("label.status.field_added").format(column=rule.column), foreground=GRAY)
 
     def remove_field(self) -> None:
@@ -1152,14 +1287,32 @@ class App:
         if index is None:
             messagebox.showinfo(self.tr("app.title"), self.tr("error.select_field_remove"))
             return
-        column = self.fields[index].column
-        if not messagebox.askyesno(self.tr("app.title"), self.tr("confirm.remove_field").format(column=column)):
-            return
-        self.fields.pop(index)
+        removed = self.fields.remove(index)
         self.editing_index = None
         self.save_rules()
         self.refresh_fields_view()
         self.select_field(min(index, len(self.fields) - 1) if self.fields else None)
+        # No confirmation dialog: the deletion can be undone from the status bar instead.
+        self.save_status.configure(text=self.tr("status.field_removed").format(column=removed.column), foreground=GRAY)
+        self._update_undo_button()
+
+    def undo_remove_field(self) -> None:
+        self.flush_editor()
+        index = self.fields.undo_remove()
+        self._update_undo_button()
+        if index is None:
+            self.save_status.configure(text=self.tr("status.undo_failed"), foreground=AMBER)
+            return
+        self.editing_index = None
+        self.save_rules()
+        self.refresh_fields_view()
+        self.select_field(index)
+
+    def _update_undo_button(self) -> None:
+        if self.fields.can_undo:
+            self.undo_button.pack(side=tk.LEFT, padx=(12, 0))
+        else:
+            self.undo_button.pack_forget()
 
     def move_field(self, offset: int) -> None:
         self.flush_editor()
@@ -1167,11 +1320,11 @@ class App:
         if index is None:
             messagebox.showinfo(self.tr("app.title"), self.tr("error.select_field_move"))
             return
-        new_index = index + offset
-        if not 0 <= new_index < len(self.fields):
+        new_index = self.fields.move(index, offset)
+        if new_index is None:
             return
-        self.fields[index], self.fields[new_index] = self.fields[new_index], self.fields[index]
         self.editing_index = None
+        self._update_undo_button()
         self.save_rules()
         self.refresh_fields_view()
         self.select_field(new_index)

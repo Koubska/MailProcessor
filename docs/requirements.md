@@ -225,6 +225,7 @@ Built with `tkinter` (`gui_app.py`; testable logic in `gui.py`, `ui_model.py`, `
 * **Einstellungen:** Excel file (file picker) and sheet names, language, limits, maintenance ("Alles neu exportieren", "Protokoll öffnen", settings folder) and technical settings (log level, SQLite path, file locations).
 * Every change is saved automatically once valid (`ui_model.config_from_form` validates per input); invalid inputs are marked in red next to the field and not saved. Closing with invalid inputs or during a run asks first. The IMAP password is never written to disk.
 * Plain-language error messages with a concrete next step; technical details stay visible.
+* Hover hints on buttons and inputs; keyboard shortcuts Ctrl/⌘+Enter (Jetzt übertragen), Ctrl/⌘+Shift+Enter (Testlauf), Ctrl/⌘+E (Excel öffnen). Deleting a field needs no confirmation and can be undone. Window size, position and tab are remembered.
 * German by default, English available.
 
 The pipeline and the connection test run on background threads so the window stays responsive.

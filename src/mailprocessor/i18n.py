@@ -137,10 +137,6 @@ CATALOG: dict[str, dict[str, str]] = {
             "erhalten."
         ),
         "confirm.close_invalid": "Einige Eingaben sind ungültig und wurden nicht gespeichert. Trotzdem beenden?",
-        "confirm.remove_field": (
-            "Das Feld „{column}“ löschen? Die Spalte wird bei neuen Excel-Dateien nicht mehr "
-            "angelegt."
-        ),
         "label.status.field_added": "Feld „{column}“ hinzugefügt.",
         "info.folder_missing": "Den Ordner gibt es nicht: {file}",
         "mails.title": "Woher kommen die E-Mails?",
@@ -201,6 +197,41 @@ CATALOG: dict[str, dict[str, str]] = {
         "problems.unreadable": "Diese E-Mail konnte nicht gelesen werden und lässt sich nicht anzeigen.\n\n{reason}",
         "problems.opened": "E-Mail „{name}“ geöffnet – nicht gefunden: {columns}",
         "button.open_problem": "In Beispiel-Mail öffnen",
+        "button.undo": "Rückgängig",
+        "status.field_removed": "Feld „{column}“ gelöscht.",
+        "status.undo_failed": "Das Feld lässt sich nicht wiederherstellen, weil es den Spaltennamen inzwischen gibt.",
+        "tip.run": "Liest neue E-Mails und trägt sie in die Excel-Datei ein.",
+        "tip.test_run": "Zeigt, was passieren würde, ohne etwas zu speichern.",
+        "tip.open_excel": "Öffnet die Excel-Datei mit dem Standardprogramm.",
+        "tip.card_mails": "Im Reiter „E-Mails“ festlegen, woher die E-Mails kommen.",
+        "tip.card_fields": "Im Reiter „Felder“ festlegen, was aus jeder E-Mail übernommen wird.",
+        "tip.stop": "Hält nach der aktuellen E-Mail an. Bisher Übertragenes bleibt gespeichert.",
+        "tip.open_problem": "Zeigt die E-Mail im Reiter „Felder“; das fehlende Feld ist dort ausgewählt.",
+        "tip.details": "Zeigt das technische Protokoll der Läufe.",
+        "tip.open_log": "Öffnet die Protokolldatei, z. B. für eine Fehlermeldung. Sie enthält keine E-Mail-Inhalte.",
+        "tip.open_folder": "Öffnet den Ordner im Datei-Explorer bzw. Finder.",
+        "tip.ssl": (
+            "Empfohlen. Ohne SSL wird die Verbindung per STARTTLS verschlüsselt; unverschlüsselt wird "
+            "nie verbunden."
+        ),
+        "tip.test_connection": (
+            "Meldet sich am Postfach an und öffnet den Ordner nur lesend. Es wird keine E-Mail "
+            "gelesen."
+        ),
+        "tip.field_new": "Leeres Formular für ein neues Feld.",
+        "tip.field_remove": "Löscht das ausgewählte Feld. Lässt sich danach über „Rückgängig“ wiederherstellen.",
+        "tip.field_move": "Ändert die Reihenfolge der Felder.",
+        "tip.field_required": "Fehlt der Wert in einer E-Mail, kommt sie ins Blatt „fehler“ statt in die Tabelle.",
+        "tip.field_type": "Wie der Wert in der E-Mail gefunden wird. Darunter steht eine kurze Erklärung.",
+        "tip.as_regex": (
+            "Wandelt die Regel in einen regulären Ausdruck zum Feinjustieren um. Lässt sich nicht "
+            "zurückwandeln."
+        ),
+        "tip.sample_previous": "Vorherige E-Mail aus dem Ordner",
+        "tip.sample_next": "Nächste E-Mail aus dem Ordner",
+        "tip.sample_load": "Beliebige .eml-Datei als Beispiel laden.",
+        "tip.sample_paste": "Den kopierten Text einer E-Mail als Beispiel einfügen.",
+        "tip.undo": "Stellt das zuletzt gelöschte Feld wieder her.",
         "rule.or": " oder ",
         "rule.describe.label": "Zeile nach {labels}",
         "rule.describe.next_line": "Zeile unter {labels}",
@@ -403,7 +434,6 @@ CATALOG: dict[str, dict[str, str]] = {
         "error.load": "The settings could not be read; defaults are shown.\n\n{error}",
         "confirm.close_running": "A transfer is running. Quit anyway? What was transferred so far is kept.",
         "confirm.close_invalid": "Some inputs are invalid and were not saved. Quit anyway?",
-        "confirm.remove_field": "Delete the field “{column}”? New Excel files will no longer get this column.",
         "label.status.field_added": "Field “{column}” added.",
         "info.folder_missing": "The folder does not exist: {file}",
         "mails.title": "Where do the emails come from?",
@@ -460,6 +490,35 @@ CATALOG: dict[str, dict[str, str]] = {
         "problems.unreadable": "This email could not be read and cannot be shown.\n\n{reason}",
         "problems.opened": "Opened email “{name}” – not found: {columns}",
         "button.open_problem": "Open as sample mail",
+        "button.undo": "Undo",
+        "status.field_removed": "Field “{column}” deleted.",
+        "status.undo_failed": "The field cannot be restored because its column name is in use now.",
+        "tip.run": "Reads new emails and adds them to the Excel file.",
+        "tip.test_run": "Shows what would happen without saving anything.",
+        "tip.open_excel": "Opens the Excel file with the default program.",
+        "tip.card_mails": "Set in the “Emails” tab where the emails come from.",
+        "tip.card_fields": "Set in the “Fields” tab what is taken from each email.",
+        "tip.stop": "Stops after the current email. What was transferred so far stays saved.",
+        "tip.open_problem": "Shows the email in the “Fields” tab with the missing field selected.",
+        "tip.details": "Shows the technical log of the runs.",
+        "tip.open_log": "Opens the log file, e.g. for a bug report. It contains no email content.",
+        "tip.open_folder": "Opens the folder in Explorer or Finder.",
+        "tip.ssl": "Recommended. Without SSL the connection is encrypted with STARTTLS; it never connects unencrypted.",
+        "tip.test_connection": "Logs in and opens the mailbox folder read-only. No email is read.",
+        "tip.field_new": "Empty form for a new field.",
+        "tip.field_remove": "Deletes the selected field. “Undo” brings it back.",
+        "tip.field_move": "Changes the order of the fields.",
+        "tip.field_required": (
+            "If the value is missing in an email, it goes to the “fehler” sheet instead of the "
+            "table."
+        ),
+        "tip.field_type": "How the value is found in the email. A short explanation is shown below.",
+        "tip.as_regex": "Turns the rule into a regular expression for fine-tuning. Cannot be turned back.",
+        "tip.sample_previous": "Previous email from the folder",
+        "tip.sample_next": "Next email from the folder",
+        "tip.sample_load": "Load any .eml file as the sample.",
+        "tip.sample_paste": "Paste the copied text of an email as the sample.",
+        "tip.undo": "Restores the field deleted last.",
         "rule.or": " or ",
         "rule.describe.label": "Line after {labels}",
         "rule.describe.next_line": "Line below {labels}",
