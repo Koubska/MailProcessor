@@ -46,7 +46,7 @@ from mailprocessor.preview import (
     sample_files,
     summary_text,
 )
-from mailprocessor.processor import run_pipeline, start_over
+from mailprocessor.processor import Problem, run_pipeline, start_over
 from mailprocessor.rule_patterns import LABEL_TYPES, RULE_TYPES, RuleType
 from mailprocessor.sources.imap_source import check_imap_connection
 from mailprocessor.ui_model import (
@@ -58,6 +58,7 @@ from mailprocessor.ui_model import (
     form_values,
     mail_count_in_folder,
     mails_status,
+    problem_text,
 )
 
 GREEN, RED, AMBER, GRAY = "#15803d", "#b91c1c", "#b45309", "gray"
@@ -101,6 +102,7 @@ class App:
 
         self.sample: dict = {"files": [], "index": -1, "title": "", "header_text": ""}
         self.previews: list[RulePreview] | None = None
+        self.problems: tuple[Problem, ...] = ()
         self.editor_mode = "edit"  # "edit": changes apply to the selected field; "new": "Hinzufügen" adds it
         self.field_type: RuleType = "label"
 
@@ -252,8 +254,30 @@ class App:
         self.result_label = ttk.Label(tab, wraplength=900, justify=tk.LEFT, font=self.bold_font)
         self.result_label.pack(anchor="w", pady=(16, 0))
 
+        # Mails that failed in the last run, each with a direct way to the rule that did not match.
+        self.problems_frame = ttk.Frame(tab)
+        self.label(self.problems_frame, "problems.title", style="Heading.TLabel").pack(anchor="w")
+        self.hint(self.problems_frame, "problems.hint", wrap=900).pack(anchor="w", pady=(2, 6))
+        problem_list = ttk.Frame(self.problems_frame)
+        problem_list.pack(fill=tk.X)
+        self.problems_view = ttk.Treeview(
+            problem_list, columns=("mail", "problem"), show="headings", height=5, selectmode="browse"
+        )
+        self.problems_view.column("mail", width=320, anchor="w")
+        self.problems_view.column("problem", width=520, anchor="w")
+        problems_scroll = ttk.Scrollbar(problem_list, orient=tk.VERTICAL, command=self.problems_view.yview)
+        self.problems_view.configure(yscrollcommand=problems_scroll.set)
+        self.problems_view.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        problems_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.problems_view.bind("<Double-1>", lambda _event: self.open_problem())
+        self.problems_view.bind("<Return>", lambda _event: self.open_problem())
+        self.problems_view.bind("<<TreeviewSelect>>", lambda _event: self._update_problem_button())
+        self.open_problem_button = self.button(self.problems_frame, "button.open_problem", self.open_problem)
+        self.open_problem_button.pack(anchor="w", pady=(6, 0))
+
         details_row = ttk.Frame(tab)
         details_row.pack(fill=tk.X, pady=(12, 0))
+        self.details_row = details_row
         self.details_button = ttk.Button(details_row, command=self.toggle_details)
         self.details_button.pack(side=tk.LEFT)
         self.button(details_row, "button.open_log", self.open_log).pack(side=tk.LEFT, padx=(8, 0))
@@ -644,6 +668,7 @@ class App:
         self.refresh_fields_view(keep_selection=True)
         self.save_config()
         self.on_source_changed()
+        self.show_problems(self.problems)
 
     # ------------------------------------------------------------------ start tab
 
@@ -687,6 +712,48 @@ class App:
     def show_result(self, text: str, color: str) -> None:
         self.result_label.configure(text=text, foreground=color)
 
+    def show_problems(self, problems: tuple[Problem, ...]) -> None:
+        self.problems = problems
+        self.problems_view.delete(*self.problems_view.get_children())
+        for index, problem in enumerate(problems):
+            self.problems_view.insert(
+                "", tk.END, iid=str(index), values=(problem.name, problem_text(problem, self.lang))
+            )
+        if problems:
+            self.problems_frame.pack(fill=tk.X, pady=(12, 0), before=self.details_row)
+            self.problems_view.selection_set("0")
+        else:
+            self.problems_frame.pack_forget()
+        self._update_problem_button()
+
+    def _update_problem_button(self) -> None:
+        selection = self.problems_view.selection()
+        readable = bool(selection) and self.problems[int(selection[0])].body is not None
+        self.open_problem_button.state(["!disabled"] if readable else ["disabled"])
+
+    def open_problem(self) -> None:
+        """Show the failed mail in the Felder tab and select the first field that was not found."""
+        selection = self.problems_view.selection()
+        if not selection:
+            return
+        problem = self.problems[int(selection[0])]
+        if problem.body is None:
+            messagebox.showinfo(self.tr("app.title"), self.tr("problems.unreadable").format(reason=problem.reason))
+            return
+        self.show_sample(
+            SampleMail(title=problem.name, body=normalize_body(problem.body), header_text=problem.header_text)
+        )
+        self.notebook.select(2)
+        columns = [rule.column for rule in self.fields]
+        missing = [column for column in problem.missing if column in columns]
+        if missing:
+            self.flush_editor()
+            self.select_field(columns.index(missing[0]))
+        self.save_status.configure(
+            text=self.tr("problems.opened").format(name=problem.name, columns=", ".join(problem.missing)),
+            foreground=GRAY,
+        )
+
     # ------------------------------------------------------------------ running
 
     def set_busy(self, busy: bool) -> None:
@@ -705,6 +772,7 @@ class App:
     def execute_run(self, dry_run: bool) -> None:
         if self.running:
             return
+        self.show_problems(())
         if not self.flush_saves():
             messagebox.showerror(self.tr("app.title"), self.tr("error.fix_inputs"))
             self.jump_to_first_error()
@@ -776,6 +844,7 @@ class App:
             )
             self.append_log(text)
             self.show_result(text, AMBER if summary.failed or summary.cancelled else GREEN)
+            self.show_problems(summary.problems)
         else:
             message = friendly_error(payload, self.lang)
             self.append_log(f"ERROR   {message}")

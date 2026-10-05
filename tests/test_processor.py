@@ -546,3 +546,22 @@ def test_start_over_keeps_backup_and_exports_everything_again(tmp_path: Path) ->
 def test_start_over_without_previous_run_does_nothing(tmp_path: Path) -> None:
     assert start_over(_build_config(tmp_path)) is None
     assert not (tmp_path / "data").exists()
+
+
+def test_problems_name_the_mail_and_missing_fields_also_in_a_test_run(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _write_eml(inbox / "good.eml", GOOD_BODY, "good@example.com")
+    _write_eml(inbox / "no-phone.eml", GOOD_BODY[:-1], "no-phone@example.com")
+    (inbox / "broken.eml").write_bytes(b"")
+    config = _build_config(tmp_path)
+    config.app.dry_run = True
+
+    summary = run_pipeline(config, _build_rules())
+
+    problems = {problem.name.split(" ")[0]: problem for problem in summary.problems}
+    assert summary.failed == len(summary.problems)
+    phone = problems["no-phone.eml"]
+    assert phone.missing == ("Telefonnummer",)
+    assert phone.body is not None and "Angebot: Experimente" in phone.body
+    assert "Max Mustermann" in phone.header_text

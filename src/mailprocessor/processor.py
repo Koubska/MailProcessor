@@ -26,6 +26,22 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[int, int], None]
 
 
+# Details are kept for at most this many failed messages per run (they hold the mail text in memory).
+MAX_PROBLEM_DETAILS = 500
+
+
+@dataclass(frozen=True)
+class Problem:
+    """A message that failed in this run, for the GUI's problem list. Never logged or written anywhere."""
+
+    name: str  # display name: file name or IMAP uid
+    reason: str
+    missing: tuple[str, ...] = ()
+    # The mail text and headers as parsed, so the GUI can show the mail; None if it could not be read.
+    body: str | None = None
+    header_text: str = ""
+
+
 @dataclass(frozen=True)
 class RunSummary:
     seen: int
@@ -34,6 +50,7 @@ class RunSummary:
     failed: int
     # True if the run was stopped early; everything handled until then was saved.
     cancelled: bool = False
+    problems: tuple[Problem, ...] = ()
 
 
 def _is_within_max_age(message: NormalizedMail, max_age_days: int, now_utc: datetime) -> bool:
@@ -143,6 +160,7 @@ def run_pipeline(
         excel.check_writable()
 
     seen = processed = skipped = failed = 0
+    problems: list[Problem] = []
     cancelled = False
     max_messages = app_cfg.app.max_messages
 
@@ -199,6 +217,16 @@ def run_pipeline(
 
             failed += 1
             logger.warning("Failed %s: %s", item.display_name, result.error_reason)
+            if len(problems) < MAX_PROBLEM_DETAILS:
+                problems.append(
+                    Problem(
+                        name=item.display_name,
+                        reason=result.error_reason or "",
+                        missing=tuple(result.missing_required),
+                        body=item.body_text if is_mail else None,
+                        header_text=item.header_text if is_mail else "",
+                    )
+                )
             if not dry_run:
                 ledger.mark_failed(key, result.error_reason)
                 excel.upsert_error(
@@ -226,7 +254,14 @@ def run_pipeline(
     if failed:
         logger.warning("%d message(s) failed; details are in the '%s' sheet", failed, app_cfg.app.sheet_errors)
 
-    return RunSummary(seen=seen, processed=processed, skipped=skipped, failed=failed, cancelled=cancelled)
+    return RunSummary(
+        seen=seen,
+        processed=processed,
+        skipped=skipped,
+        failed=failed,
+        cancelled=cancelled,
+        problems=tuple(problems),
+    )
 
 
 def start_over(app_cfg: AppConfig, now: datetime | None = None) -> Path | None:

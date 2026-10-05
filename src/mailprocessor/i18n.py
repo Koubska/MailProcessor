@@ -191,6 +191,16 @@ CATALOG: dict[str, dict[str, str]] = {
             "Sicherung erhalten."
         ),
         "settings.technical": "Technisches",
+        "problems.title": "E-Mails mit Problemen",
+        "problems.hint": (
+            "Doppelklick öffnet die E-Mail im Reiter „Felder“. Dort ist das fehlende Feld ausgewählt, "
+            "und Sie sehen sofort, warum es nicht gefunden wurde."
+        ),
+        "problems.missing": "nicht gefunden: {columns}",
+        "problems.unreadable_short": "E-Mail konnte nicht gelesen werden",
+        "problems.unreadable": "Diese E-Mail konnte nicht gelesen werden und lässt sich nicht anzeigen.\n\n{reason}",
+        "problems.opened": "E-Mail „{name}“ geöffnet – nicht gefunden: {columns}",
+        "button.open_problem": "In Beispiel-Mail öffnen",
         "rule.or": " oder ",
         "rule.describe.label": "Zeile nach {labels}",
         "rule.describe.next_line": "Zeile unter {labels}",
@@ -440,6 +450,16 @@ CATALOG: dict[str, dict[str, str]] = {
             "Transfers all emails again into a new Excel file. The current file is kept as a backup."
         ),
         "settings.technical": "Technical",
+        "problems.title": "Emails with problems",
+        "problems.hint": (
+            "Double-click opens the email in the “Fields” tab. The missing field is selected there, "
+            "and you see right away why it was not found."
+        ),
+        "problems.missing": "not found: {columns}",
+        "problems.unreadable_short": "email could not be read",
+        "problems.unreadable": "This email could not be read and cannot be shown.\n\n{reason}",
+        "problems.opened": "Opened email “{name}” – not found: {columns}",
+        "button.open_problem": "Open as sample mail",
         "rule.or": " or ",
         "rule.describe.label": "Line after {labels}",
         "rule.describe.next_line": "Line below {labels}",

@@ -6,12 +6,14 @@ from openpyxl import Workbook
 from mailprocessor.config import FieldRule
 from mailprocessor.gui import _default_config
 from mailprocessor.preview import RulePreview
+from mailprocessor.processor import Problem
 from mailprocessor.ui_model import (
     config_from_form,
     excel_status,
     fields_status,
     form_values,
     mails_status,
+    problem_text,
 )
 
 
@@ -98,3 +100,12 @@ def test_excel_status_counts_rows(tmp_path: Path) -> None:
     assert excel_status(path, "daten", "fehler", "de").text == "out.xlsx – 2 Zeile(n), 1 E-Mail(s) mit Problemen"
     (tmp_path / "broken.xlsx").write_text("not excel", encoding="utf-8")
     assert excel_status(tmp_path / "broken.xlsx", "daten", "fehler", "de").ok is None
+
+
+def test_problem_text() -> None:
+    missing = Problem(name="a.eml", reason="Required fields missing: Tel, Kurs", missing=("Tel", "Kurs"), body="x")
+    unreadable = Problem(name="file:b.eml", reason="Could not read file (OSError)")
+
+    assert problem_text(missing, "de") == "nicht gefunden: „Tel“, „Kurs“"
+    assert problem_text(unreadable, "de") == "E-Mail konnte nicht gelesen werden"
+    assert problem_text(Problem(name="c", reason="Internal parser error", body="x"), "en") == "Internal parser error"

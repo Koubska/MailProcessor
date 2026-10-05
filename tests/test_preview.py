@@ -35,7 +35,7 @@ def test_preview_values_match_a_real_run() -> None:
 
     assert [preview.value for preview in previews] == [
         "max.mustermann@mail.com",
-        "Jan Must+",
+        "Jan Mustermann",
         "Experimente",
         "Mo, 23.11.2026 (14:15-16:00 Uhr)",
         "1234 567890",

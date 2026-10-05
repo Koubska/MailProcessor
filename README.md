@@ -36,7 +36,8 @@ Das Programm hat vier Reiter, in dieser Reihenfolge einzurichten:
    **Text nach Bezeichnung** mit der Bezeichnung `Telefonnummer:`. Rechts zeigt eine Beispiel-Mail sofort,
    was gefunden wird. Die Standardregeln passen zu [docs/example.eml](docs/example.eml).
 3. **Start:** zeigt, ob alles bereit ist. **Jetzt übertragen** klicken; **Testlauf** zeigt vorher, was
-   passieren würde, ohne etwas zu speichern. **Excel öffnen** öffnet das Ergebnis.
+   passieren würde, ohne etwas zu speichern. **Excel öffnen** öffnet das Ergebnis. E-Mails mit Problemen
+   erscheinen darunter; ein Doppelklick zeigt im Reiter **Felder**, welches Feld nicht gefunden wurde.
 4. **Einstellungen:** Excel-Datei, Sprache und Weiteres – meist nicht nötig.
 
 Alle Änderungen werden automatisch gespeichert.

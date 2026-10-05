@@ -14,7 +14,7 @@ EXAMPLE = REPO / "docs" / "example.eml"
 
 EXPECTED = {
     "Mail-Adresse": "max.mustermann@mail.com",
-    "Name": "Jan Must+",
+    "Name": "Jan Mustermann",
     "Kurs": "Experimente",
     "Zeit": "Mo, 23.11.2026 (14:15-16:00 Uhr)",
     "Telefonnummer": "1234 567890",

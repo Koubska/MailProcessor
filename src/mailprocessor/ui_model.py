@@ -24,6 +24,7 @@ from mailprocessor.config import (
 from mailprocessor.gui import setting_path
 from mailprocessor.i18n import t
 from mailprocessor.preview import RulePreview, sample_files
+from mailprocessor.processor import Problem
 
 FormValues = dict[str, str | bool]
 
@@ -209,3 +210,13 @@ def _data_rows(workbook, sheet_name: str) -> int:
     if sheet_name not in workbook.sheetnames:
         return 0
     return max((workbook[sheet_name].max_row or 1) - 1, 0)
+
+
+def problem_text(problem: Problem, lang: str) -> str:
+    """What is wrong with a failed mail, for the problem list."""
+    if problem.missing:
+        columns = ", ".join(_quote(column, lang) for column in problem.missing)
+        return t("problems.missing", lang).format(columns=columns)
+    if problem.body is None:
+        return t("problems.unreadable_short", lang)
+    return problem.reason
