@@ -192,15 +192,15 @@ SQLite stores the processing history (`sqlite_path`).
 
 # 11. Excel output
 
-A single workbook (`output_xlsx`) is appended to across runs.
+A single workbook (`output_xlsx`) is appended to across runs. It is in German, like its sheet names.
 
-* **Data worksheet** (default `daten`): one column per configured field, in rule order, followed by the fixed column `E-Mail-Inhalt` with the mail's full text (as extracted for parsing; truncated to Excel's limit of 32,767 characters per cell). The name `E-Mail-Inhalt` is reserved and cannot be used for a rule. Workbooks created before this column existed get the header added automatically; their old rows stay empty in that column.
+* **Columns by name:** the app finds every column by its header, never by position. Missing columns are added at the end; nothing is moved or removed. Users can add their own columns (e.g. "Bestätigt") and notes; fields can be added, removed or reordered (a new field gets a new column at the end, a removed field's column stays and new rows leave it empty; the rule order only decides the column order of a new workbook). Only a sheet that has data but no header row stops the run with a clear message.
+* **Data worksheet** (default `daten`): one column per configured field, then `Eingegangen am` (the mail's `Date` header in local time, empty if missing or unreadable), `Übertragen am` (time of the run), both as real Excel dates (`TT.MM.JJJJ hh:mm`), and `E-Mail-Inhalt` with the mail's full text (as extracted for parsing; truncated to Excel's limit of 32,767 characters per cell). These three names are reserved and cannot be used for a rule. Older workbooks get the missing columns added; their old rows stay empty there.
+* **Error worksheet** (default `fehler`): `E-Mail` (file name or IMAP uid), `Absender`, `Betreff`, `Eingegangen am`, `Fehlende Felder`, `Grund` (plain German, technical details in parentheses), `Geprüft am`, and the hidden `Kennung` that identifies the mail across runs. Exactly one row per currently failing message; the row is removed once the message succeeds. Error sheets of earlier versions (English, technical) are converted automatically.
 * Control characters that Excel cannot store are removed from all cell values.
-* **Error worksheet** (default `fehler`): `source_type`, `source_location`, `message_identity`, `missing_columns`, `error_reason`, `processed_at`. Exactly one row per currently failing message; the row is removed once the message succeeds.
 * Bold, frozen header row and autofilter.
-* Column widths fitted to the content (between 10 and 50 characters; `E-Mail-Inhalt` fixed at 80, not wrapped, so each mail stays one row high). Columns that already have a width, from an earlier run or set by the user, keep it.
+* Column widths fitted to the content (between 10 and 50 characters; dates 17; `E-Mail-Inhalt` fixed at 80, not wrapped, so each mail stays one row high). Columns that already have a width, from an earlier run or set by the user, keep it.
 * Values extracted from emails are always stored as text, never as formulas (email content is untrusted).
-* If an existing worksheet's header does not match the configured columns, the run stops with a clear message instead of writing misaligned rows.
 * The workbook is written atomically (temporary file, then replace). A workbook open in Excel is detected before processing starts.
 
 ---

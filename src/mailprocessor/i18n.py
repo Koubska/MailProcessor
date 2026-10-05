@@ -291,10 +291,10 @@ CATALOG: dict[str, dict[str, str]] = {
             "Die Excel-Datei ist gerade in einem anderen Programm geöffnet. "
             "Bitte Excel schließen und erneut auf „Jetzt übertragen“ klicken."
         ),
-        "error.sheet_columns": (
-            "Die Spalten in der Excel-Datei passen nicht mehr zu den Feldern. "
-            "Bitte unter „Einstellungen“ eine neue Excel-Datei wählen "
-            "oder die vorherigen Felder wiederherstellen."
+        "error.sheet_header": (
+            "In einem Blatt der Excel-Datei fehlt die Überschriftenzeile (Zeile 1), daher lassen sich die "
+            "Spalten nicht zuordnen. Bitte die Überschriften wiederherstellen oder unter „Einstellungen“ "
+            "eine neue Excel-Datei wählen."
         ),
         "error.mail_folder_missing": (
             "Der E-Mail-Ordner wurde nicht gefunden. "
@@ -578,9 +578,9 @@ CATALOG: dict[str, dict[str, str]] = {
             "The Excel file is open in another program. Close Excel and click “Transfer now” "
             "again."
         ),
-        "error.sheet_columns": (
-            "The columns in the Excel file no longer match the fields. "
-            "Choose a new Excel file under “Settings” or restore the previous fields."
+        "error.sheet_header": (
+            "A sheet of the Excel file has no header row (row 1), so its columns cannot be matched. "
+            "Restore the headers or choose a new Excel file under “Settings”."
         ),
         "error.mail_folder_missing": (
             "The email folder was not found. Use “Browse …” in the “Emails” tab to choose an existing folder."

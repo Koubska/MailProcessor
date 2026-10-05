@@ -38,4 +38,5 @@ def iter_eml_messages(
                 source_location=source_location,
                 message_identity=f"file:{eml_path.name}",
                 reason=f"Could not read file ({type(exc).__name__}): {str(exc)[:200]}",
+                origin=eml_path.name,
             )

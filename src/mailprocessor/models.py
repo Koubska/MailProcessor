@@ -38,7 +38,9 @@ class MailReadError:
     source_location: str
     message_identity: str
     reason: str
+    # Where a user can find the mail: the .eml file name or "IMAP uid 123".
+    origin: str = ""
 
     @property
     def display_name(self) -> str:
-        return self.message_identity
+        return self.origin or self.message_identity

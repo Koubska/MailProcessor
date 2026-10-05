@@ -13,7 +13,14 @@ from pathlib import Path
 
 from mailprocessor.config import AppConfig, ParsingRules
 from mailprocessor.errors import MailFolderNotFoundError, WorkbookLockedError
-from mailprocessor.excel_writer import ExcelOutput
+from mailprocessor.excel_writer import (
+    INTERNAL_ERROR_REASON,
+    MISSING_FIELDS_REASON,
+    UNREADABLE_REASON,
+    ErrorEntry,
+    ExcelOutput,
+    error_key,
+)
 from mailprocessor.ledger import Ledger, LedgerKey, compute_content_hash
 from mailprocessor.models import MailReadError, NormalizedMail
 from mailprocessor.parser import ParseResult, parse_mail
@@ -53,12 +60,26 @@ class RunSummary:
     problems: tuple[Problem, ...] = ()
 
 
+def _mail_datetime(date_raw: str) -> datetime | None:
+    """The mail's Date header, or None if it is missing or unreadable."""
+    try:
+        return parsedate_to_datetime(date_raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _local_time(moment: datetime | None) -> datetime | None:
+    """As people read it in Excel: local time without a time zone (Excel cells have none)."""
+    if moment is None or moment.tzinfo is None:
+        return moment
+    return moment.astimezone().replace(tzinfo=None)
+
+
 def _is_within_max_age(message: NormalizedMail, max_age_days: int, now_utc: datetime) -> bool:
     if max_age_days <= 0:
         return True
-    try:
-        message_datetime = parsedate_to_datetime(message.date_raw)
-    except (TypeError, ValueError):
+    message_datetime = _mail_datetime(message.date_raw)
+    if message_datetime is None:
         # Without a usable Date header the age is unknown; process it rather than drop it silently.
         logger.warning("Message %s has no valid Date header; ignoring max_age_days for it", message.message_identity)
         return True
@@ -113,6 +134,26 @@ def _safe_parse(message: NormalizedMail, rules: ParsingRules) -> ParseResult:
         return ParseResult(values={}, missing_required=[], error_reason=reason)
 
 
+def _error_entry(item: NormalizedMail | MailReadError, result: ParseResult, received: datetime | None) -> ErrorEntry:
+    """The error sheet row: where to find the mail, who sent it, and why it failed, in plain German."""
+    key = error_key(item.source_type, item.source_location, item.message_identity)
+    if isinstance(item, MailReadError):
+        return ErrorEntry(key=key, name=item.display_name, reason=f"{UNREADABLE_REASON} ({item.reason})")
+    if result.missing_required:
+        reason = MISSING_FIELDS_REASON
+    else:
+        reason = f"{INTERNAL_ERROR_REASON} ({result.error_reason})"
+    return ErrorEntry(
+        key=key,
+        name=item.origin or item.display_name,
+        reason=reason,
+        sender=item.from_raw,
+        subject=item.subject,
+        received=received,
+        missing=tuple(result.missing_required),
+    )
+
+
 def _describe_source(app_cfg: AppConfig) -> str:
     if app_cfg.source.type == "imap" and app_cfg.source.imap is not None:
         imap = app_cfg.source.imap
@@ -164,9 +205,10 @@ def run_pipeline(
     cancelled = False
     max_messages = app_cfg.app.max_messages
 
-    with Ledger(Path(app_cfg.app.sqlite_path), read_only=dry_run) as ledger, closing(
-        iter_source_messages(app_cfg, progress=progress)
-    ) as messages:
+    with (
+        Ledger(Path(app_cfg.app.sqlite_path), read_only=dry_run) as ledger,
+        closing(iter_source_messages(app_cfg, progress=progress)) as messages,
+    ):
         if excel.is_new and ledger.count_processed():
             logger.warning(
                 "%s is new but the ledger already lists processed messages; those are not exported again. "
@@ -198,6 +240,8 @@ def run_pipeline(
             seen += 1
 
             result = _safe_parse(item, rules) if is_mail else ParseResult({}, [], item.reason)
+            received = _local_time(_mail_datetime(item.date_raw)) if is_mail else None
+            sheet_key = error_key(key.source_type, key.source_location, key.message_identity)
             if is_mail:
                 # Column names only; extracted values are confidential and never logged.
                 logger.debug(
@@ -210,8 +254,8 @@ def run_pipeline(
                 processed += 1
                 logger.info("Processed %s", item.display_name)
                 if not dry_run:
-                    excel.append_data(result.values, item.body_text)
-                    excel.remove_errors_for(key.source_type, key.source_location, key.message_identity)
+                    excel.append_data(result.values, item.body_text, received=received)
+                    excel.remove_errors_for(sheet_key)
                     ledger.mark_processed(key)
                 continue
 
@@ -229,16 +273,7 @@ def run_pipeline(
                 )
             if not dry_run:
                 ledger.mark_failed(key, result.error_reason)
-                excel.upsert_error(
-                    {
-                        "source_type": key.source_type,
-                        "source_location": key.source_location,
-                        "message_identity": key.message_identity,
-                        "missing_columns": ", ".join(result.missing_required),
-                        "error_reason": result.error_reason,
-                        "processed_at": datetime.now(UTC).isoformat(),
-                    }
-                )
+                excel.upsert_error(_error_entry(item, result, received))
 
         if not dry_run:
             # Save the workbook first; the ledger only records messages whose rows are on disk.
@@ -248,9 +283,7 @@ def run_pipeline(
         else:
             logger.info("Dry run: %s and the ledger were not changed", excel.path)
 
-    logger.info(
-        "Run finished: seen=%d processed=%d skipped=%d failed=%d", seen, processed, skipped, failed
-    )
+    logger.info("Run finished: seen=%d processed=%d skipped=%d failed=%d", seen, processed, skipped, failed)
     if failed:
         logger.warning("%d message(s) failed; details are in the '%s' sheet", failed, app_cfg.app.sheet_errors)
 
