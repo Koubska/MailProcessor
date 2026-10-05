@@ -1,6 +1,6 @@
 import logging
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -16,6 +16,7 @@ from mailprocessor.config import (
     ParsingRules,
     SourceConfig,
 )
+from mailprocessor.excel_writer import ERROR_COLUMNS, RECEIVED_COLUMN, TRANSFERRED_COLUMN
 from mailprocessor.ledger import Ledger
 from mailprocessor.models import NormalizedMail
 from mailprocessor.processor import iter_source_messages, run_pipeline, start_over
@@ -293,8 +294,10 @@ def test_eml_read_errors_are_reported_and_batch_continues(tmp_path: Path, monkey
 
     assert (summary.processed, summary.failed) == (1, 1)
     errors = load_workbook(tmp_path / "out" / "mail_export.xlsx")["fehler"]
-    assert errors["C2"].value == "file:a-broken.eml"
-    assert "disk error" in errors["E2"].value
+    row = dict(zip(ERROR_COLUMNS, next(errors.iter_rows(min_row=2, values_only=True)), strict=True))
+    assert row["E-Mail"] == "a-broken.eml"
+    assert row["Grund"].startswith("E-Mail konnte nicht gelesen werden")
+    assert "disk error" in row["Grund"]
 
 
 def test_max_messages_counts_only_new_messages(tmp_path: Path) -> None:
@@ -467,8 +470,8 @@ def test_data_rows_include_the_full_mail_text(tmp_path: Path) -> None:
     run_pipeline(_build_config(tmp_path), _build_rules())
 
     sheet = load_workbook(tmp_path / "out" / "mail_export.xlsx")["daten"]
-    assert sheet.cell(row=1, column=6).value == "E-Mail-Inhalt"
-    assert sheet.cell(row=2, column=6).value == "\n".join(GOOD_BODY)
+    assert sheet.cell(row=1, column=8).value == "E-Mail-Inhalt"
+    assert sheet.cell(row=2, column=8).value == "\n".join(GOOD_BODY)
 
 
 def test_control_characters_in_a_mail_do_not_abort_the_run(tmp_path: Path) -> None:
@@ -565,3 +568,64 @@ def test_problems_name_the_mail_and_missing_fields_also_in_a_test_run(tmp_path: 
     assert phone.missing == ("Telefonnummer",)
     assert phone.body is not None and "Angebot: Experimente" in phone.body
     assert "Max Mustermann" in phone.header_text
+
+
+def _data_rows(tmp_path: Path) -> list[dict]:
+    sheet = load_workbook(tmp_path / "out" / "mail_export.xlsx")["daten"]
+    header, *rows = sheet.iter_rows(values_only=True)
+    return [dict(zip(header, row, strict=True)) for row in rows]
+
+
+def test_rows_get_the_mail_date_and_the_transfer_time(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _write_eml_with_date(inbox / "a.eml", GOOD_BODY, "a@example.com", "Mon, 23 Nov 2026 14:00:00 +0100")
+    before = datetime.now().replace(microsecond=0)
+
+    run_pipeline(_build_config(tmp_path), _build_rules())
+
+    row = _data_rows(tmp_path)[0]
+    expected = datetime(2026, 11, 23, 13, 0, tzinfo=UTC).astimezone().replace(tzinfo=None)
+    assert row[RECEIVED_COLUMN] == expected  # shown in local time, as people read it
+    assert before <= row[TRANSFERRED_COLUMN] <= datetime.now() + timedelta(seconds=1)
+
+
+def test_mail_without_date_is_still_transferred(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _write_eml_with_date(inbox / "a.eml", GOOD_BODY, "a@example.com", "kein Datum")
+
+    summary = run_pipeline(_build_config(tmp_path), _build_rules())
+
+    assert summary.processed == 1
+    assert _data_rows(tmp_path)[0][RECEIVED_COLUMN] is None
+
+
+def test_error_sheet_names_file_sender_subject_and_missing_fields(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _write_eml(inbox / "ohne-telefon.eml", GOOD_BODY[:-1], "no-phone@example.com")
+
+    run_pipeline(_build_config(tmp_path), _build_rules())
+
+    errors = load_workbook(tmp_path / "out" / "mail_export.xlsx")["fehler"]
+    row = dict(zip(ERROR_COLUMNS, next(errors.iter_rows(min_row=2, values_only=True)), strict=True))
+    assert row["E-Mail"] == "ohne-telefon.eml"
+    assert row["Absender"] == "Max Mustermann <max.mustermann@mail.com>"
+    assert row["Betreff"] == "Schnuppernachmittag"
+    assert isinstance(row["Eingegangen am"], datetime)
+    assert row["Fehlende Felder"] == "Telefonnummer"
+    assert row["Grund"] == "Pflichtfelder nicht gefunden"
+
+
+def test_fixed_mail_removes_its_error_row(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _write_eml(inbox / "a.eml", GOOD_BODY[:-1], "a@example.com")
+    run_pipeline(_build_config(tmp_path), _build_rules())
+    _write_eml(inbox / "a.eml", GOOD_BODY, "a@example.com")  # e.g. the form was fixed and the mail sent again
+
+    summary = run_pipeline(_build_config(tmp_path), _build_rules())
+
+    assert summary.processed == 1
+    assert load_workbook(tmp_path / "out" / "mail_export.xlsx")["fehler"].max_row == 1

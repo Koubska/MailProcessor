@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from mailprocessor.config import create_missing_files, load_app_config, load_parsing_rules
+from mailprocessor.config import FieldRule, ParsingRules, create_missing_files, load_app_config, load_parsing_rules
 
 
 def test_load_app_config_for_eml_source(tmp_path: Path) -> None:
@@ -160,3 +160,9 @@ def test_create_missing_files_never_overwrites(tmp_path: Path) -> None:
     assert created == [tmp_path / "parsing_rules.toml"]
     assert (tmp_path / "config.toml").read_text(encoding="utf-8") == "mine"
     assert not (tmp_path / "mails").exists()
+
+
+@pytest.mark.parametrize("column", ["E-Mail-Inhalt", "Eingegangen am", "Übertragen am"])
+def test_columns_the_app_fills_itself_are_reserved(column: str) -> None:
+    with pytest.raises(ValueError, match="is reserved"):
+        ParsingRules(fields=[FieldRule(column=column, type="label", label="X")])

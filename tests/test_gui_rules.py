@@ -12,7 +12,7 @@ from mailprocessor.errors import (
     ImapLoginError,
     MailFolderNotFoundError,
     MissingPasswordError,
-    SheetColumnsError,
+    SheetHeaderError,
     WorkbookLockedError,
 )
 from mailprocessor.gui import (
@@ -104,7 +104,7 @@ def test_render_rules_text_escapes_control_characters() -> None:
 def test_mail_text_column_name_is_reserved() -> None:
     text = render_rules_text([FieldRule(column="E-Mail-Inhalt", pattern="a", required=True)])
 
-    with pytest.raises(ValueError, match="reserved for the mail text"):
+    with pytest.raises(ValueError, match="is reserved"):
         parse_rules_text(text)
 
 
@@ -187,7 +187,7 @@ def test_run_summary_text_dry_run_says_nothing_was_saved() -> None:
     ("exc", "key"),
     [
         (WorkbookLockedError("Cannot write out.xlsx"), "error.workbook_locked"),
-        (SheetColumnsError("has columns"), "error.sheet_columns"),
+        (SheetHeaderError("no header row"), "error.sheet_header"),
         (MailFolderNotFoundError("EML folder does not exist"), "error.mail_folder_missing"),
         (MissingPasswordError("IMAP password is missing"), "error.imap_password_missing"),
         (ImapLoginError("IMAP login failed"), "error.imap_login"),

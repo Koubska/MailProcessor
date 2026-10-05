@@ -14,8 +14,8 @@ class WorkbookLockedError(OSError):
     """The Excel file cannot be written, typically because it is open in Excel."""
 
 
-class SheetColumnsError(ValueError):
-    """An existing sheet has different columns than the parsing rules."""
+class SheetHeaderError(ValueError):
+    """A sheet the app writes to has data but no header row, so its columns cannot be found."""
 
 
 class ImapLoginError(OSError):

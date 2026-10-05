@@ -129,6 +129,7 @@ def _read_error(source_location: str, uid: bytes, reason: str) -> MailReadError:
         source_location=source_location,
         message_identity=f"uid:{uid.decode('ascii', errors='replace')}",
         reason=reason,
+        origin=f"IMAP uid {uid.decode('ascii', errors='replace')}",
     )
 
 

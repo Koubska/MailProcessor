@@ -42,10 +42,13 @@ Das Programm hat vier Reiter, in dieser Reihenfolge einzurichten:
 
 Alle Änderungen werden automatisch gespeichert.
 
-Die Ergebnisse landen in `out/mail_export.xlsx`: Das Blatt **daten** enthält eine Zeile pro E-Mail; die
-letzte Spalte **E-Mail-Inhalt** enthält jeweils den vollständigen Text der E-Mail. Das Blatt **fehler** listet
-E-Mails, die nicht verarbeitet werden konnten, mit Grund. Einfach erneut übertragen, wenn neue E-Mails
-eingehen; nur neue werden hinzugefügt.
+Die Ergebnisse landen in `out/mail_export.xlsx`: Das Blatt **daten** enthält eine Zeile pro E-Mail mit den
+Feldern, **Eingegangen am**, **Übertragen am** und dem vollständigen **E-Mail-Inhalt**. Das Blatt **fehler**
+listet E-Mails, die nicht verarbeitet werden konnten, mit Datei, Absender, Betreff und Grund. Einfach erneut
+übertragen, wenn neue E-Mails eingehen; nur neue werden hinzugefügt.
+
+Eigene Spalten (z. B. „Bestätigt“) und Notizen in der Excel-Datei bleiben erhalten. Neue Felder bekommen eine
+neue Spalte am Ende.
 
 Bei Problemen: unter **Einstellungen → Protokoll öffnen** steht, was passiert ist. Das Protokoll enthält
 keine E-Mail-Inhalte und kann einer Fehlermeldung beigelegt werden.

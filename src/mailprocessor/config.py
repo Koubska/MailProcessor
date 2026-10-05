@@ -10,7 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from mailprocessor.excel_writer import CONTENT_COLUMN
+from mailprocessor.excel_writer import FIXED_DATA_COLUMNS
 from mailprocessor.rule_patterns import LABEL_TYPES, RuleType, build_pattern
 
 
@@ -117,8 +117,9 @@ class ParsingRules(BaseModel):
         duplicates = sorted({column for column in columns if columns.count(column) > 1})
         if duplicates:
             raise ValueError(f"Duplicate parsing column names are not allowed: {', '.join(duplicates)}")
-        if CONTENT_COLUMN in columns:
-            raise ValueError(f"The column name '{CONTENT_COLUMN}' is reserved for the mail text")
+        for reserved in FIXED_DATA_COLUMNS:
+            if reserved in columns:
+                raise ValueError(f"The column name '{reserved}' is reserved: the app fills that column itself")
         return self
 
 
