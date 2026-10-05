@@ -3,7 +3,15 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook, load_workbook
 
-from mailprocessor.excel_writer import CONTENT_COLUMN, ERROR_COLUMNS, EXCEL_CELL_LIMIT, ExcelOutput
+from mailprocessor.excel_writer import (
+    CONTENT_COLUMN,
+    CONTENT_COLUMN_WIDTH,
+    ERROR_COLUMNS,
+    EXCEL_CELL_LIMIT,
+    MAX_COLUMN_WIDTH,
+    MIN_COLUMN_WIDTH,
+    ExcelOutput,
+)
 
 DATA_COLUMNS = ["Mail-Adresse", "Name", "Kurs", "Zeit", "Telefonnummer"]
 
@@ -160,3 +168,33 @@ def test_workbook_without_content_column_is_upgraded(tmp_path: Path) -> None:
 
     rows = list(load_workbook(path)["daten"].iter_rows(values_only=True))
     assert rows == [("Name", CONTENT_COLUMN), ("Alt", None), ("Neu", "Text")]
+
+
+def test_save_formats_header_and_column_widths(tmp_path: Path) -> None:
+    path = tmp_path / "output.xlsx"
+    output = ExcelOutput(path, "daten", "fehler", DATA_COLUMNS)
+    output.append_data({"Mail-Adresse": "max.mustermann@mail.com", "Name": "x" * 200}, "Text\n" * 50)
+    output.save()
+
+    sheet = load_workbook(path)["daten"]
+    assert all(cell.font.bold for cell in sheet[1])
+    widths = {letter: sheet.column_dimensions[letter].width for letter in "ABCDEF"}
+    assert widths["A"] == len("max.mustermann@mail.com") + 2
+    assert widths["B"] == MAX_COLUMN_WIDTH
+    assert widths["C"] == MIN_COLUMN_WIDTH  # "Kurs", empty
+    assert widths["F"] == CONTENT_COLUMN_WIDTH
+    assert not sheet["F2"].alignment.wrap_text  # one row per mail, however long the text
+
+
+def test_save_keeps_column_widths_set_by_the_user(tmp_path: Path) -> None:
+    path = tmp_path / "output.xlsx"
+    ExcelOutput(path, "daten", "fehler", DATA_COLUMNS).save()
+    workbook = load_workbook(path)
+    workbook["daten"].column_dimensions["B"].width = 33
+    workbook.save(path)
+
+    output = ExcelOutput(path, "daten", "fehler", DATA_COLUMNS)
+    output.append_data({"Name": "x" * 200}, "Text")
+    output.save()
+
+    assert load_workbook(path)["daten"].column_dimensions["B"].width == 33

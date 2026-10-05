@@ -17,12 +17,12 @@ from mailprocessor.errors import (
 from mailprocessor.gui import (
     QueueLogHandler,
     UiFieldRule,
-    folder_setting,
     friendly_error,
     open_in_default_app,
     output_file_path,
     parse_config_text,
     parse_rules_text,
+    path_setting,
     render_config_text,
     render_rules_text,
     run_summary_text,
@@ -114,19 +114,23 @@ def test_parse_rules_text_rejects_duplicate_columns() -> None:
         parse_rules_text(text)
 
 
-def test_folder_setting_is_relative_inside_config_folder(tmp_path: Path) -> None:
+def test_path_setting_is_relative_inside_config_folder(tmp_path: Path) -> None:
     (tmp_path / "mails" / "2026").mkdir(parents=True)
 
-    assert folder_setting(tmp_path / "mails", tmp_path) == "./mails"
-    assert folder_setting(tmp_path / "mails" / "2026", tmp_path) == "./mails/2026"
-    assert folder_setting(tmp_path, tmp_path) == "."
+    assert path_setting(tmp_path / "mails", tmp_path) == "./mails"
+    assert path_setting(tmp_path / "mails" / "2026", tmp_path) == "./mails/2026"
+    assert path_setting(tmp_path, tmp_path) == "."
 
 
-def test_folder_setting_is_absolute_outside_config_folder(tmp_path: Path) -> None:
+def test_path_setting_is_absolute_outside_config_folder(tmp_path: Path) -> None:
     (tmp_path / "app").mkdir()
     (tmp_path / "elsewhere").mkdir()
 
-    assert folder_setting(tmp_path / "elsewhere", tmp_path / "app") == str((tmp_path / "elsewhere").resolve())
+    assert path_setting(tmp_path / "elsewhere", tmp_path / "app") == str((tmp_path / "elsewhere").resolve())
+
+
+def test_path_setting_works_for_files(tmp_path: Path) -> None:
+    assert path_setting(tmp_path / "out" / "export.xlsx", tmp_path) == "./out/export.xlsx"
 
 
 def test_queue_log_handler_forwards_formatted_lines_respecting_level() -> None:

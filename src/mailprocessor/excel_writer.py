@@ -7,6 +7,8 @@ from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from mailprocessor.errors import SheetColumnsError, WorkbookLockedError
@@ -14,6 +16,13 @@ from mailprocessor.errors import SheetColumnsError, WorkbookLockedError
 # Always the last column of the data sheet: the full text of the mail.
 CONTENT_COLUMN = "E-Mail-Inhalt"
 EXCEL_CELL_LIMIT = 32_767
+# Column widths in characters. The mail text gets a fixed, wide column without wrapping,
+# so each mail stays one row high; the full text shows when the cell is selected.
+CONTENT_COLUMN_WIDTH = 80
+MIN_COLUMN_WIDTH = 10
+MAX_COLUMN_WIDTH = 50
+_WIDTH_SAMPLE_ROWS = 500
+HEADER_FONT = Font(bold=True)
 _TRUNCATION_NOTE = "\n[… gekürzt: Excel erlaubt höchstens 32.767 Zeichen pro Zelle]"
 
 ERROR_COLUMNS = [
@@ -42,6 +51,24 @@ def _cell_text(value: object) -> object:
     if len(value) > EXCEL_CELL_LIMIT:
         value = value[: EXCEL_CELL_LIMIT - len(_TRUNCATION_NOTE)] + _TRUNCATION_NOTE
     return value
+
+
+def _format_sheet(sheet: Worksheet, fixed_widths: dict[int, float]) -> None:
+    """Bold header and readable column widths. Columns that already have a width
+    (from an earlier run or set by the user in Excel) keep it."""
+    for cell in sheet[1]:
+        cell.font = HEADER_FONT
+    sample_end = min(sheet.max_row, _WIDTH_SAMPLE_ROWS)
+    for index, cells in enumerate(sheet.iter_cols(max_row=sample_end, values_only=True), start=1):
+        letter = get_column_letter(index)
+        if letter in sheet.column_dimensions:
+            continue
+        width = fixed_widths.get(index)
+        if width is None:
+            lines = (line for value in cells if value is not None for line in str(value).splitlines())
+            longest = max((len(line) for line in lines), default=0)
+            width = min(max(longest + 2, MIN_COLUMN_WIDTH), MAX_COLUMN_WIDTH)
+        sheet.column_dimensions[letter].width = width
 
 
 def _append_text_row(sheet: Worksheet, values: list[object]) -> None:
@@ -118,10 +145,12 @@ class ExcelOutput:
         _append_text_row(self.workbook[self.error_sheet], [error.get(column, "") for column in ERROR_COLUMNS])
 
     def save(self) -> None:
+        content_index = len(self.data_columns) + 1
         for name in (self.data_sheet, self.error_sheet):
             sheet = self.workbook[name]
             sheet.freeze_panes = "A2"
             sheet.auto_filter.ref = sheet.dimensions
+            _format_sheet(sheet, {content_index: CONTENT_COLUMN_WIDTH} if name == self.data_sheet else {})
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = self.path.with_name(f".{self.path.name}.tmp")
         try:

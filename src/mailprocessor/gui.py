@@ -146,8 +146,8 @@ def render_config_text(config: AppConfig) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def folder_setting(chosen: Path, config_dir: Path) -> str:
-    """Config value for a picked folder: relative if inside the config folder (keeps it portable), else absolute."""
+def path_setting(chosen: Path, config_dir: Path) -> str:
+    """Config value for a picked folder or file: relative if inside the config folder (keeps it portable), else absolute."""
     chosen, config_dir = chosen.resolve(), config_dir.resolve()
     if chosen.is_relative_to(config_dir):
         return f"./{chosen.relative_to(config_dir).as_posix()}".removesuffix("/.")
@@ -292,6 +292,7 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
     output_xlsx_var = tk.StringVar()
     sheet_data_var = tk.StringVar(value="daten")
     sheet_errors_var = tk.StringVar(value="fehler")
+    # Not shown in the UI: the "Testlauf" and "Ausführen" buttons decide per run. Kept so the file value survives saving.
     dry_run_var = tk.BooleanVar(value=False)
     max_age_days_var = tk.StringVar(value="0")
     max_messages_var = tk.StringVar(value="0")
@@ -311,30 +312,77 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
 
     form_labels: dict[str, ttk.Label] = {}
 
-    def add_row(row: int, label_key: str, widget) -> None:
-        label_widget = ttk.Label(form, text=tr(label_key))
-        label_widget.grid(row=row, column=0, sticky="w", pady=(0, 6))
+    def add_row(parent, row: int, label_key: str, widget) -> None:
+        label_widget = ttk.Label(parent, text=tr(label_key))
+        label_widget.grid(row=row, column=0, sticky="w", padx=(0, 8), pady=(0, 6))
         form_labels[label_key] = label_widget
         widget.grid(row=row, column=1, sticky="ew", pady=(0, 6))
 
+    # Main settings: where the mails come from and where the Excel file goes.
     add_row(
+        form,
         0,
-        "label.log_level",
-        ttk.Combobox(form, textvariable=log_level_var, values=["DEBUG", "INFO", "WARNING", "ERROR"], state="readonly"),
+        "label.source_type",
+        ttk.Combobox(form, textvariable=source_type_var, values=["eml", "imap"], state="readonly"),
     )
-    add_row(1, "label.sqlite_path", ttk.Entry(form, textvariable=sqlite_path_var))
-    add_row(2, "label.output_xlsx", ttk.Entry(form, textvariable=output_xlsx_var))
-    add_row(3, "label.sheet_data", ttk.Entry(form, textvariable=sheet_data_var))
-    add_row(4, "label.sheet_errors", ttk.Entry(form, textvariable=sheet_errors_var))
-    add_row(5, "label.max_age_days", ttk.Entry(form, textvariable=max_age_days_var))
-    add_row(6, "label.max_messages", ttk.Entry(form, textvariable=max_messages_var))
-    add_row(7, "label.source_type", ttk.Combobox(form, textvariable=source_type_var, values=["eml", "imap"], state="readonly"))
-    dry_run_checkbox = ttk.Checkbutton(form, text=tr("bool.dry_run"), variable=dry_run_var)
-    dry_run_checkbox.grid(row=8, column=1, sticky="w", pady=(0, 6))
 
     source_frame = ttk.LabelFrame(form, text=tr("source.details"), padding=8)
-    source_frame.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+    source_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
     source_frame.columnconfigure(1, weight=1)
+
+    output_row = ttk.Frame(form)
+    ttk.Entry(output_row, textvariable=output_xlsx_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+    def choose_output_file() -> None:
+        current = output_file_path(output_xlsx_var.get().strip(), cfg_path.resolve().parent)
+        chosen = filedialog.asksaveasfilename(
+            parent=root,
+            title=tr("dialog.choose_output_xlsx"),
+            initialdir=str(current.parent if current.parent.is_dir() else cfg_path.resolve().parent),
+            initialfile=current.name,
+            defaultextension=".xlsx",
+            filetypes=[("Excel", "*.xlsx")],
+            # New rows are appended to an existing file; it is never replaced.
+            confirmoverwrite=False,
+        )
+        if chosen:
+            output_xlsx_var.set(path_setting(Path(chosen), cfg_path.resolve().parent))
+
+    output_browse_button = ttk.Button(output_row, text=tr("button.browse"), command=choose_output_file)
+    output_browse_button.pack(side=tk.LEFT, padx=(8, 0))
+    add_row(form, 2, "label.output_xlsx", output_row)
+
+    # Technical settings, collapsed by default.
+    advanced_visible = tk.BooleanVar(value=False)
+    advanced_toggle = ttk.Button(form, command=lambda: toggle_advanced())
+    advanced_toggle.grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 6))
+    advanced_frame = ttk.Frame(form)
+    advanced_frame.columnconfigure(1, weight=1)
+    add_row(
+        advanced_frame,
+        0,
+        "label.log_level",
+        ttk.Combobox(
+            advanced_frame, textvariable=log_level_var, values=["DEBUG", "INFO", "WARNING", "ERROR"], state="readonly"
+        ),
+    )
+    add_row(advanced_frame, 1, "label.sqlite_path", ttk.Entry(advanced_frame, textvariable=sqlite_path_var))
+    add_row(advanced_frame, 2, "label.sheet_data", ttk.Entry(advanced_frame, textvariable=sheet_data_var))
+    add_row(advanced_frame, 3, "label.sheet_errors", ttk.Entry(advanced_frame, textvariable=sheet_errors_var))
+    add_row(advanced_frame, 4, "label.max_age_days", ttk.Entry(advanced_frame, textvariable=max_age_days_var))
+    add_row(advanced_frame, 5, "label.max_messages", ttk.Entry(advanced_frame, textvariable=max_messages_var))
+
+    def update_advanced_toggle() -> None:
+        key = "button.advanced_hide" if advanced_visible.get() else "button.advanced_show"
+        advanced_toggle.configure(text=tr(key))
+
+    def toggle_advanced() -> None:
+        advanced_visible.set(not advanced_visible.get())
+        if advanced_visible.get():
+            advanced_frame.grid(row=4, column=0, columnspan=2, sticky="ew")
+        else:
+            advanced_frame.grid_forget()
+        update_advanced_toggle()
 
     eml_frame = ttk.Frame(source_frame)
     eml_folder_label = ttk.Label(eml_frame, text=tr("source.eml.folder"))
@@ -352,7 +400,7 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
             mustexist=True,
         )
         if chosen:
-            eml_folder_var.set(folder_setting(Path(chosen), cfg_path.resolve().parent))
+            eml_folder_var.set(path_setting(Path(chosen), cfg_path.resolve().parent))
 
     eml_browse_button = ttk.Button(eml_frame, text=tr("button.browse"), command=choose_eml_folder)
     eml_browse_button.grid(row=0, column=2, sticky="w", padx=(8, 0), pady=(0, 6))
@@ -459,7 +507,8 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
         notebook.tab(1, text=tr("tab.fields"))
         for key, label_widget in form_labels.items():
             label_widget.configure(text=tr(key))
-        dry_run_checkbox.configure(text=tr("bool.dry_run"))
+        update_advanced_toggle()
+        output_browse_button.configure(text=tr("button.browse"))
         source_frame.configure(text=tr("source.details"))
         eml_folder_label.configure(text=tr("source.eml.folder"))
         eml_browse_button.configure(text=tr("button.browse"))
@@ -479,6 +528,7 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
         save_button.configure(text=tr("button.save"))
         reload_button.configure(text=tr("button.reload"))
         run_button.configure(text=tr("button.run"))
+        test_run_button.configure(text=tr("button.test_run"))
         open_excel_button.configure(text=tr("button.open_excel"))
         add_update_button.configure(text=tr("button.field_add_update"))
         remove_button.configure(text=tr("button.field_remove"))
@@ -657,7 +707,7 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
 
     def set_busy(busy: bool) -> None:
         state = tk.DISABLED if busy else tk.NORMAL
-        for button in (run_button, save_button, reload_button):
+        for button in (run_button, test_run_button, save_button, reload_button):
             button.configure(state=state)
 
     def run_worker(app_config: AppConfig, parsing_rules: ParsingRules) -> None:
@@ -698,7 +748,7 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
             status_var.set(tr("label.status.run_failed"))
             messagebox.showerror(tr("app.title"), message)
 
-    def execute_run() -> None:
+    def execute_run(dry_run: bool) -> None:
         try:
             if not fields:
                 raise ValueError("At least one parsing field is required")
@@ -707,6 +757,7 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
             parsing_rules = load_parsing_rules(rules_file)
             if app_config.source.imap is not None:
                 app_config.source.imap.password = imap_password_var.get() or None
+            app_config.app.dry_run = dry_run
         except (ValueError, OSError) as exc:
             status_var.set(tr("label.status.run_failed"))
             messagebox.showerror(tr("app.title"), friendly_error(exc, current_language))
@@ -724,8 +775,10 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
     save_button.pack(side="left")
     reload_button = ttk.Button(button_row, text=tr("button.reload"), command=on_reload)
     reload_button.pack(side="left", padx=(8, 0))
-    run_button = ttk.Button(button_row, text=tr("button.run"), command=execute_run)
+    run_button = ttk.Button(button_row, text=tr("button.run"), command=lambda: execute_run(dry_run=False))
     run_button.pack(side="right")
+    test_run_button = ttk.Button(button_row, text=tr("button.test_run"), command=lambda: execute_run(dry_run=True))
+    test_run_button.pack(side="right", padx=(0, 8))
     open_excel_button = ttk.Button(button_row, text=tr("button.open_excel"), command=open_output)
     open_excel_button.pack(side="right", padx=(0, 8))
 

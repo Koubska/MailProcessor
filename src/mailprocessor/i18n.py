@@ -19,7 +19,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "label.rules_file": "Regeldatei",
         "label.log_level": "Log-Level",
         "label.sqlite_path": "SQLite-Pfad",
-        "label.output_xlsx": "Output-XLSX-Pfad",
+        "label.output_xlsx": "Excel-Datei",
         "label.sheet_data": "Daten-Sheet",
         "label.sheet_errors": "Fehler-Sheet",
         "label.max_age_days": "Maximales Alter (Tage)",
@@ -57,7 +57,6 @@ CATALOG: dict[str, dict[str, str]] = {
         "source.imap.mailbox": "Mailbox",
         "source.imap.sender_filter": "Absender-Filter",
         "source.imap.use_ssl": "SSL verwenden",
-        "bool.dry_run": "Dry Run",
         "view.field.column": "Spalte",
         "view.field.required": "Pflicht",
         "view.field.pattern": "Pattern",
@@ -66,10 +65,14 @@ CATALOG: dict[str, dict[str, str]] = {
         "error.select_field_remove": "Bitte ein Feld zum Entfernen auswählen",
         "error.select_field_move": "Bitte ein Feld zum Verschieben auswählen",
         "button.open_excel": "Excel öffnen",
+        "button.test_run": "Testlauf",
+        "button.advanced_show": "▸ Erweiterte Einstellungen",
+        "button.advanced_hide": "▾ Erweiterte Einstellungen",
+        "dialog.choose_output_xlsx": "Excel-Datei für die Ergebnisse wählen",
         "info.no_excel_yet": "Es gibt noch keine Excel-Datei ({file}). Sie entsteht beim ersten Klick auf „Ausführen“.",
         "error.open_excel": "Die Excel-Datei konnte nicht geöffnet werden: {file}\n\n{error}",
         "summary.dry_run": (
-            "Testlauf (Dry Run): {new} neue E-Mail(s) gefunden, davon {ok} fehlerfrei und {failed} mit Problemen. "
+            "Testlauf: {new} neue E-Mail(s) gefunden, davon {ok} fehlerfrei und {failed} mit Problemen. "
             "Es wurde nichts gespeichert."
         ),
         "summary.processed": "{count} neue Zeile(n) in {file} eingetragen.",
@@ -83,7 +86,7 @@ CATALOG: dict[str, dict[str, str]] = {
         ),
         "error.sheet_columns": (
             "Die Spalten in der Excel-Datei passen nicht mehr zu den Parsing-Feldern. "
-            "Bitte im Reiter „App-Konfiguration“ einen neuen Output-XLSX-Pfad eintragen "
+            "Bitte im Reiter „App-Konfiguration“ einen eine neue Excel-Datei wählen "
             "oder die vorherigen Felder wiederherstellen."
         ),
         "error.mail_folder_missing": (
@@ -115,7 +118,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "label.rules_file": "Rules file",
         "label.log_level": "Log level",
         "label.sqlite_path": "SQLite path",
-        "label.output_xlsx": "Output xlsx path",
+        "label.output_xlsx": "Excel file",
         "label.sheet_data": "Data sheet",
         "label.sheet_errors": "Error sheet",
         "label.max_age_days": "Max age days",
@@ -153,7 +156,6 @@ CATALOG: dict[str, dict[str, str]] = {
         "source.imap.mailbox": "Mailbox",
         "source.imap.sender_filter": "Sender filter",
         "source.imap.use_ssl": "Use SSL",
-        "bool.dry_run": "Dry run",
         "view.field.column": "Column",
         "view.field.required": "Required",
         "view.field.pattern": "Pattern",
@@ -162,10 +164,14 @@ CATALOG: dict[str, dict[str, str]] = {
         "error.select_field_remove": "Select a field row to remove",
         "error.select_field_move": "Select a field row to move",
         "button.open_excel": "Open Excel",
+        "button.test_run": "Test run",
+        "button.advanced_show": "▸ Advanced settings",
+        "button.advanced_hide": "▾ Advanced settings",
+        "dialog.choose_output_xlsx": "Choose the Excel file for the results",
         "info.no_excel_yet": "There is no Excel file yet ({file}). It is created by the first click on “Run”.",
         "error.open_excel": "Could not open the Excel file: {file}\n\n{error}",
         "summary.dry_run": (
-            "Dry run: found {new} new email(s), {ok} without problems and {failed} with problems. "
+            "Test run: found {new} new email(s), {ok} without problems and {failed} with problems. "
             "Nothing was saved."
         ),
         "summary.processed": "Added {count} new row(s) to {file}.",
@@ -176,7 +182,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "error.workbook_locked": "The Excel file is open in another program. Close Excel and click “Run” again.",
         "error.sheet_columns": (
             "The columns in the Excel file no longer match the parsing fields. "
-            "Enter a new output xlsx path in the “App config” tab or restore the previous fields."
+            "Choose a new Excel file in the “App config” tab or restore the previous fields."
         ),
         "error.mail_folder_missing": (
             "The email folder was not found. Use “Browse …” in the “App config” tab to choose an existing folder."

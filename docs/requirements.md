@@ -178,7 +178,8 @@ A single workbook (`output_xlsx`) is appended to across runs.
 * **Data worksheet** (default `daten`): one column per configured field, in rule order, followed by the fixed column `E-Mail-Inhalt` with the mail's full text (as extracted for parsing; truncated to Excel's limit of 32,767 characters per cell). The name `E-Mail-Inhalt` is reserved and cannot be used for a rule. Workbooks created before this column existed get the header added automatically; their old rows stay empty in that column.
 * Control characters that Excel cannot store are removed from all cell values.
 * **Error worksheet** (default `fehler`): `source_type`, `source_location`, `message_identity`, `missing_columns`, `error_reason`, `processed_at`. Exactly one row per currently failing message; the row is removed once the message succeeds.
-* Header row, frozen header and autofilter.
+* Bold, frozen header row and autofilter.
+* Column widths fitted to the content (between 10 and 50 characters; `E-Mail-Inhalt` fixed at 80, not wrapped, so each mail stays one row high). Columns that already have a width, from an earlier run or set by the user, keep it.
 * Values extracted from emails are always stored as text, never as formulas (email content is untrusted).
 * If an existing worksheet's header does not match the configured columns, the run stops with a clear message instead of writing misaligned rows.
 * The workbook is written atomically (temporary file, then replace). A workbook open in Excel is detected before processing starts.
@@ -199,10 +200,12 @@ The GUI edits `config.toml` and `parsing_rules.toml`, so normal users do not nee
 
 Built with `tkinter`; intentionally small:
 
-* App settings and source settings (IMAP, or an `.eml` folder chosen with a folder picker; the file pattern is only configurable in `config.toml`)
+* Main settings: source (IMAP, or an `.eml` folder chosen with a folder picker; the file pattern is only configurable in `config.toml`) and the Excel file (file picker)
+* Technical settings (log level, SQLite path, sheet names, limits) under a collapsed "Erweiterte Einstellungen" section
 * Editor for parsing fields (add, update, remove, reorder)
-* Save, reload and run
-* Run summary and status line
+* Save and reload; "Testlauf" runs with `dry_run` (nothing is written), "Ausführen" runs for real. The `dry_run` value in `config.toml` is kept but ignored by the GUI
+* "Excel öffnen" opens the workbook with the system's default program
+* Plain-language run summary and error messages with a concrete next step; technical details stay visible
 * German by default, English available
 
 The pipeline runs on a background thread so the window stays responsive.
@@ -253,5 +256,5 @@ The following were part of the original Outlook-focused plan. They are not imple
 * Parser version tracking in the ledger, so that parser changes can deliberately trigger reprocessing.
 * Local log files with rotation.
 * Progress display (`Processing 137 / 317`) and cancellation in the GUI.
-* Excel column widths and date-typed columns.
+* Date-typed columns.
 * Remembering GUI settings per user (e.g. under `%LOCALAPPDATA%`).
