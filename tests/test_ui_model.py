@@ -12,6 +12,8 @@ from mailprocessor.ui_model import (
     CardStatus,
     ProfileList,
     RuleList,
+    column_note,
+    complete_column,
     config_from_form,
     excel_status,
     fields_status,
@@ -344,3 +346,71 @@ def test_renaming_a_profile_may_change_only_its_case() -> None:
     profiles.rename("Anmeldung", "de")
 
     assert profiles.names == ["Anmeldung"]
+
+
+def _two_profiles() -> ProfileList:
+    profiles = ProfileList(
+        [
+            Profile(
+                name="Anmeldung", fields=[_rule("Mail-Adresse"), _rule("Kurs", "Angebot:"), _rule("Telefonnummer")]
+            ),
+            Profile(name="Abmeldung", fields=[_rule("Kurs", "Angebot:"), _rule("Grund")]),
+        ]
+    )
+    profiles.add("Warteliste", "de")
+    profiles.current.add(_rule("Kurs", "Angebot:"))
+    return profiles
+
+
+def test_column_suggestions_come_from_the_other_profiles() -> None:
+    profiles = _two_profiles()
+
+    # "Kurs" is already used in the shown profile, so it is not offered again.
+    assert profiles.column_suggestions("") == ["Mail-Adresse", "Telefonnummer", "Grund"]
+    # Matches anywhere in the name, ignoring case.
+    assert profiles.column_suggestions("ADR") == ["Mail-Adresse"]
+    assert profiles.column_suggestions("nummer") == ["Telefonnummer"]
+    # While editing "Kurs" itself, its name stays available.
+    assert "Kurs" in profiles.column_suggestions("", except_index=0)
+
+
+def test_complete_column_continues_what_was_typed() -> None:
+    suggestions = ["Mail-Adresse", "Telefonnummer", "Grund"]
+
+    assert complete_column("tel", suggestions) == "Telefonnummer"
+    assert complete_column("Grund", suggestions) is None  # nothing left to add
+    assert complete_column("", suggestions) is None
+    assert complete_column("x", suggestions) is None
+
+
+def test_rule_for_column_comes_from_the_first_other_profile() -> None:
+    profiles = _two_profiles()
+
+    rule = profiles.rule_for_column("Kurs")
+
+    assert rule is not None and rule.label == ["Angebot:"]
+    assert profiles.rule_for_column("Unbekannt") is None
+
+
+def test_column_note_explains_shared_and_own_columns() -> None:
+    profiles = _two_profiles()
+
+    shared = column_note(profiles, "Kurs", False, "de")
+    assert (
+        shared.text
+        == "Gleiche Spalte wie in den Profilen „Anmeldung“, „Abmeldung“ – in Excel stehen die Werte untereinander."
+    )
+    assert column_note(profiles, "Grund", False, "de").text.startswith("Gleiche Spalte wie im Profil „Abmeldung“")
+    assert column_note(profiles, "Wunsch", False, "de").text.startswith("Eigene Spalte dieses Profils")
+    assert column_note(profiles, "Kurs", True, "de").text == "Spalte im Blatt „Warteliste“ (ein Blatt pro Profil)."
+
+
+def test_column_note_warns_about_near_duplicates() -> None:
+    note = column_note(_two_profiles(), "telefon-nummer", False, "de")
+
+    assert note.warning
+    assert "„Telefonnummer“ (Profil „Anmeldung“)" in note.text and "zweite Spalte" in note.text
+
+
+def test_column_note_is_empty_with_one_profile() -> None:
+    assert column_note(ProfileList([Profile(name="A", fields=[_rule("Kurs")])]), "Kurs", False, "de").text == ""

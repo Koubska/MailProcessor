@@ -7,6 +7,7 @@ automatically only when everything is valid.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -410,6 +411,39 @@ class ProfileList:
         self.index = min(self.index, len(self.names) - 1)
         return name
 
+    def other_columns(self) -> list[str]:
+        """Columns of the other profiles, each once, in profile order."""
+        columns = (
+            rule.column for index, rules in enumerate(self.fields) if index != self.index for rule in rules
+        )
+        return list(dict.fromkeys(columns))
+
+    def column_suggestions(self, typed: str, except_index: int | None = None) -> list[str]:
+        """Column names of other profiles to offer in the shown profile: not used there yet, containing `typed`.
+
+        `except_index` is the field being edited; its own name stays available.
+        """
+        own = set(self.current.columns(except_index=except_index))
+        wanted = typed.strip().casefold()
+        return [column for column in self.other_columns() if column not in own and wanted in column.casefold()]
+
+    def profiles_with_column(self, column: str) -> list[str]:
+        """The other profiles that have exactly this column."""
+        return [
+            name
+            for index, (name, rules) in enumerate(zip(self.names, self.fields, strict=True))
+            if index != self.index and column in rules.columns()
+        ]
+
+    def rule_for_column(self, column: str) -> FieldRule | None:
+        """How another profile finds this column (the first that has it), to start from in the shown profile."""
+        for index, rules in enumerate(self.fields):
+            if index != self.index:
+                for rule in rules:
+                    if rule.column == column:
+                        return rule
+        return None
+
     def profiles(self) -> list[Profile]:
         """The profiles to save: all that have fields."""
         return [
@@ -419,6 +453,51 @@ class ProfileList:
     def parsing_rules(self) -> ParsingRules:
         """Raises ValueError if no profile has fields yet."""
         return ParsingRules(profiles=self.profiles())
+
+
+def complete_column(typed: str, suggestions: list[str]) -> str | None:
+    """The first suggestion that continues what was typed (ignoring case), for inline completion."""
+    wanted = typed.casefold()
+    if not wanted:
+        return None
+    for suggestion in suggestions:
+        if suggestion.casefold().startswith(wanted) and len(suggestion) > len(typed):
+            return suggestion
+    return None
+
+
+def _column_key(column: str) -> str:
+    """Spelling-insensitive form of a column name, to spot near-duplicates such as "Telefon-Nr" / "telefon nr"."""
+    return re.sub(r"[\s\-_.:/]+", "", column.casefold())
+
+
+@dataclass(frozen=True)
+class ColumnNote:
+    text: str
+    warning: bool = False
+
+
+def column_note(profiles: ProfileList, column: str, per_profile_sheets: bool, lang: str) -> ColumnNote:
+    """Where the column ends up in Excel, shown under the column name when there are several profiles."""
+    column = column.strip()
+    if len(profiles) < 2 or not column:
+        return ColumnNote("")
+    if per_profile_sheets:
+        return ColumnNote(t("column.note.per_profile", lang).format(sheet=_quote(profiles.current_name, lang)))
+    same = profiles.profiles_with_column(column)
+    if same:
+        key = "column.note.shared_one" if len(same) == 1 else "column.note.shared_many"
+        return ColumnNote(t(key, lang).format(profiles=", ".join(_quote(name, lang) for name in same)))
+    similar = [other for other in profiles.other_columns() if _column_key(other) == _column_key(column)]
+    if similar:
+        return ColumnNote(
+            t("column.note.similar", lang).format(
+                column=_quote(similar[0], lang),
+                profiles=", ".join(_quote(name, lang) for name in profiles.profiles_with_column(similar[0])),
+            ),
+            warning=True,
+        )
+    return ColumnNote(t("column.note.own", lang))
 
 
 @dataclass(frozen=True)

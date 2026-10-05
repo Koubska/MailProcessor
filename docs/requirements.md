@@ -166,6 +166,7 @@ required = true
 * A file with only top-level `[[fields]]` (written before profiles existed) is one profile named `Standard`. Using both `[[fields]]` and `[[profiles]]` is an error. The GUI always writes `[[profiles]]`.
 * Profile names are unique (ignoring case) and must be valid Excel sheet names (at most 31 characters, none of `[ ] : * ? / \`, no leading or trailing `'`), because they can become sheet names. Column names are unique within a profile; the same column may appear in several profiles.
 * Every profile needs at least one field. The GUI keeps a new, still empty profile while editing but saves and runs only profiles with fields.
+* In the GUI, the column name suggests the columns of the other profiles (choosing one for a new field copies that profile's rule) and states where the column ends up: shared with other profiles, only this profile's, or, as a warning, a near-duplicate of another profile's column (same name ignoring case, spaces and `-_.:/`) that would become a second column.
 
 * Labels are matched tolerantly: case-insensitive, any spacing, optional colon, at the start of a line, and not as a word prefix ("Tag" does not match "Tagesordnung:"). `label` and `email` never take a value from the next line. Inputs are matched literally (escaped).
 * A rule without `type` is a `regex` rule, so files from before the simple types keep working. The GUI writes only the inputs of each rule's type. "Als Regex bearbeiten" converts a simple rule into a `regex` rule; this is one-way.

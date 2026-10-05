@@ -59,6 +59,8 @@ from mailprocessor.ui_model import (
     CardStatus,
     ProfileList,
     RuleList,
+    column_note,
+    complete_column,
     config_from_form,
     excel_status,
     fields_status,
@@ -75,6 +77,8 @@ GREEN, RED, AMBER, GRAY = "#15803d", "#b91c1c", "#b45309", "gray"
 TOOLTIP_BACKGROUND, TOOLTIP_FOREGROUND = "#fffbe6", "#1f2937"
 HIGHLIGHT = "#fde68a"
 LANGUAGES = {"de": "Deutsch", "en": "English"}
+# Keys that must not trigger inline completion of a column name (deleting, moving, modifiers).
+COMPLETION_IGNORED_KEYS = {"BackSpace", "Delete", "Left", "Right", "Up", "Down", "Home", "End", "Tab", "Return"}
 # Which tab holds which input, to jump to the first problem.
 INPUT_TABS = {
     **dict.fromkeys(("eml_folder", "imap_host", "imap_port", "imap_username"), 1),
@@ -563,19 +567,28 @@ class App:
             variable.trace_add("write", lambda *_args: self.on_editor_changed())
 
         self.label(self.editor, "label.field_column").grid(row=0, column=0, sticky="w", padx=(0, 8))
-        self.column_entry = ttk.Entry(self.editor, textvariable=self.field_vars["column"])
+        # Editable: suggests the columns of the other profiles (same name = same Excel column).
+        self.column_entry = ttk.Combobox(
+            self.editor, textvariable=self.field_vars["column"], postcommand=self.update_column_choices
+        )
         self.column_entry.grid(row=0, column=1, sticky="ew")
+        self.tip(self.column_entry, "tip.field_column")
+        self.column_entry.bind("<KeyRelease>", self.on_column_typed)
+        self.column_entry.bind("<<ComboboxSelected>>", lambda _event: self.on_column_chosen())
+        self.column_entry.bind("<Return>", lambda _event: self.on_column_chosen())
         required_box = ttk.Checkbutton(self.editor, variable=self.field_required)
         self._translate(required_box, "label.field_required").grid(row=0, column=2, sticky="w", padx=(12, 0))
         self.tip(required_box, "tip.field_required")
-        self.label(self.editor, "label.field_type").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(8, 0))
+        self.column_hint = ttk.Label(self.editor, style="Hint.TLabel", wraplength=self.px(520), justify=tk.LEFT)
+        self.column_hint.grid(row=1, column=1, columnspan=2, sticky="w", pady=(2, 0))
+        self.label(self.editor, "label.field_type").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(8, 0))
         self.type_box = ttk.Combobox(self.editor, state="readonly")
         self.tip(self.type_box, "tip.field_type")
-        self.type_box.grid(row=1, column=1, sticky="ew", pady=(8, 0))
+        self.type_box.grid(row=2, column=1, sticky="ew", pady=(8, 0))
         self.type_box.bind("<<ComboboxSelected>>", lambda _event: self.on_type_selected())
 
         self.inputs = ttk.Frame(self.editor)
-        self.inputs.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        self.inputs.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
         self.inputs.columnconfigure(1, weight=1)
         self.input_widgets = {
             "labels": (ttk.Label(self.inputs), ttk.Entry(self.inputs, textvariable=self.field_vars["labels"])),
@@ -593,13 +606,13 @@ class App:
             ),
         }
         self.type_hint = ttk.Label(self.editor, style="Hint.TLabel", wraplength=self.px(560), justify=tk.LEFT)
-        self.type_hint.grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        self.type_hint.grid(row=4, column=0, columnspan=3, sticky="w", pady=(6, 0))
         self.editor_result = ttk.Label(self.editor, wraplength=self.px(560), justify=tk.LEFT, font=self.bold_font)
-        self.editor_result.grid(row=4, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        self.editor_result.grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
         self.editor_problem = ttk.Label(self.editor, wraplength=self.px(560), justify=tk.LEFT, foreground=AMBER)
-        self.editor_problem.grid(row=5, column=0, columnspan=3, sticky="w")
+        self.editor_problem.grid(row=6, column=0, columnspan=3, sticky="w")
         editor_buttons = ttk.Frame(self.editor)
-        editor_buttons.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        editor_buttons.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         self.add_button = self.button(editor_buttons, "button.field_add", self.add_field)
         self.cancel_new_button = self.button(editor_buttons, "button.cancel", self.cancel_new_field)
         self.as_regex_button = self.button(editor_buttons, "button.as_regex", self.convert_to_regex, tip="tip.as_regex")
@@ -667,6 +680,9 @@ class App:
         ):
             choice = ttk.Radiobutton(layout, variable=self.form["profile_sheets"], value=value)
             self._translate(choice, key).pack(anchor="w")
+        self.hint(excel, "settings.profile_sheets_hint", wrap=440).grid(
+            row=8, column=0, columnspan=2, sticky="w", pady=(4, 0)
+        )
 
         language = self._section(left, "settings.language")
         self.language_box = ttk.Combobox(language, state="readonly", values=list(LANGUAGES.values()), width=20)
@@ -759,6 +775,7 @@ class App:
             self.root.after_cancel(self.save_job)
         self.save_job = self.root.after(400, self.save_config)
         self.on_source_changed()
+        self.update_column_note()  # depends on "one sheet per profile"
 
     def save_config(self) -> bool:
         """Save the inputs if they are valid; mark invalid ones. Returns whether everything is saved."""
@@ -1390,6 +1407,57 @@ class App:
             lang=self.lang,
         )
 
+    def _column_suggestions(self) -> list[str]:
+        index = self.editing_index if self.editor_mode == "edit" else None
+        return self.profiles.column_suggestions(self.field_vars["column"].get(), except_index=index)
+
+    def update_column_choices(self) -> None:
+        """Fill the drop-down just before it opens: other profiles' columns that match what was typed."""
+        index = self.editing_index if self.editor_mode == "edit" else None
+        typed = self.field_vars["column"].get()
+        choices = self.profiles.column_suggestions(typed, except_index=index)
+        # Exactly one of them typed: show them all, so the list also works for switching to another name.
+        self.column_entry.configure(values=choices if choices != [typed] else self.profiles.column_suggestions(""))
+
+    def on_column_typed(self, event: tk.Event) -> None:
+        """Complete a new field's name inline from the other profiles; the completed part stays selected."""
+        if self.editor_mode != "new" or event.keysym in COMPLETION_IGNORED_KEYS or len(event.char) != 1:
+            return
+        typed = self.column_entry.get()[: self.column_entry.index(tk.INSERT)]
+        completion = complete_column(typed, self._column_suggestions())
+        if completion is None:
+            return
+        self.field_vars["column"].set(completion)
+        self.column_entry.icursor(len(typed))
+        self.column_entry.selection_range(len(typed), tk.END)
+
+    def on_column_chosen(self) -> None:
+        """A new field named like another profile's column starts from that profile's rule (if nothing typed yet)."""
+        self.column_entry.selection_clear()
+        self.column_entry.icursor(tk.END)
+        column = self.field_vars["column"].get().strip()
+        rule = self.profiles.rule_for_column(column)
+        inputs = ("labels", "start", "end", "pattern")
+        if self.editor_mode != "new" or rule is None or any(self.field_vars[name].get().strip() for name in inputs):
+            return
+        self._fill_editor(rule)
+        profile = next(iter(self.profiles.profiles_with_column(column)), "")
+        self.save_status.configure(
+            text=self.tr("status.rule_copied").format(column=self._quoted(column), profile=self._quoted(profile)),
+            foreground=GRAY,
+        )
+
+    def update_column_note(self) -> None:
+        if not hasattr(self, "column_hint"):
+            return
+        per_profile = self.form["profile_sheets"].get() == "per_profile" if "profile_sheets" in self.form else False
+        note = column_note(self.profiles, self.field_vars["column"].get(), per_profile, self.lang)
+        self.column_hint.configure(text=note.text, foreground=AMBER if note.warning else GRAY)
+        if note.text:
+            self.column_hint.grid()
+        else:
+            self.column_hint.grid_remove()
+
     def on_editor_changed(self) -> None:
         if self.loading_editor:
             return
@@ -1625,6 +1693,7 @@ class App:
 
     def _update_editor_preview(self, sample: SampleMail | None) -> None:
         """Result of the rule being edited, and what is still wrong with its inputs (e.g. a duplicate column)."""
+        self.update_column_note()
         self.sample_text.tag_remove("match", "1.0", tk.END)
         self.editor_problem.configure(text="")
         inputs = {"between": ("start", "end"), "regex": ("pattern",)}.get(self.field_type, ("labels",))

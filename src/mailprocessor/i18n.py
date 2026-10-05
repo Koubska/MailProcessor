@@ -107,6 +107,25 @@ CATALOG: dict[str, dict[str, str]] = {
         "card.mails.filter_sender": "nur von {entries}",
         "card.mails.filter_or": "oder",
         "card.fields.none": "Noch keine Felder angelegt.",
+        "column.note.shared_one": "Gleiche Spalte wie im Profil {profiles} – in Excel stehen die Werte untereinander.",
+        "column.note.shared_many": (
+            "Gleiche Spalte wie in den Profilen {profiles} – in Excel stehen die Werte untereinander."
+        ),
+        "column.note.own": "Eigene Spalte dieses Profils – bei E-Mails der anderen Profile bleibt sie leer.",
+        "column.note.similar": (
+            "⚠ Fast wie {column} (Profil {profiles}), aber anders geschrieben: Das wird eine zweite Spalte. "
+            "Für dieselbe Spalte genau gleich schreiben."
+        ),
+        "column.note.per_profile": "Spalte im Blatt {sheet} (ein Blatt pro Profil).",
+        "tip.field_column": (
+            "Name der Spalte in Excel. Vorschläge kommen aus den anderen Profilen: Gleicher Name heißt "
+            "gleiche Spalte."
+        ),
+        "status.rule_copied": "Regel für {column} aus Profil {profile} übernommen – bei Bedarf anpassen.",
+        "settings.profile_sheets_hint": (
+            "Felder mit gleichem Namen teilen sich eine Spalte; die übrigen Spalten bleiben bei E-Mails "
+            "anderer Profile leer."
+        ),
         "card.profiles.count": "{profiles} Profile, {fields} Feld(er)",
         "card.profiles.fits": "{count} – die Beispiel-Mail passt zu {profile}",
         "card.profiles.none_fits": "{count} – die Beispiel-Mail passt zu keinem Profil",
@@ -462,6 +481,22 @@ CATALOG: dict[str, dict[str, str]] = {
         "card.mails.filter_sender": "only from {entries}",
         "card.mails.filter_or": "or",
         "card.fields.none": "No fields yet.",
+        "column.note.shared_one": "Same column as in the profile {profiles} – in Excel the values share one column.",
+        "column.note.shared_many": "Same column as in the profiles {profiles} – in Excel the values share one column.",
+        "column.note.own": "A column only this profile has – it stays empty for emails of the other profiles.",
+        "column.note.similar": (
+            "⚠ Almost like {column} (profile {profiles}) but spelled differently: this becomes a second column. "
+            "Spell it exactly the same for one column."
+        ),
+        "column.note.per_profile": "Column in the sheet {sheet} (one sheet per profile).",
+        "tip.field_column": (
+            "Name of the column in Excel. Suggestions come from the other profiles: "
+            "the same name means the same column."
+        ),
+        "status.rule_copied": "Copied the rule for {column} from profile {profile} – adjust it if needed.",
+        "settings.profile_sheets_hint": (
+            "Fields with the same name share one column; the other columns stay empty for emails of other profiles."
+        ),
         "card.profiles.count": "{profiles} profiles, {fields} field(s)",
         "card.profiles.fits": "{count} – the sample mail fits {profile}",
         "card.profiles.none_fits": "{count} – the sample mail fits no profile",
