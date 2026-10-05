@@ -23,6 +23,7 @@ from mailprocessor.gui import (
     _default_config,
     _read_text_or_empty,
     describe_rule,
+    enable_windows_dpi_awareness,
     friendly_error,
     open_in_default_app,
     output_file_path,
@@ -34,6 +35,7 @@ from mailprocessor.gui import (
     rule_from_inputs,
     run_summary_text,
     setting_path,
+    ui_scale,
 )
 from mailprocessor.i18n import resolve_language, t
 from mailprocessor.logfile import attach_log_file, log_file_path
@@ -81,9 +83,10 @@ class Tooltip:
 
     DELAY_MS = 600
 
-    def __init__(self, widget: tk.Widget, text: Callable[[], str]) -> None:
+    def __init__(self, widget: tk.Widget, text: Callable[[], str], wraplength: int) -> None:
         self.widget = widget
         self.text = text
+        self.wraplength = wraplength
         self.window: tk.Toplevel | None = None
         self.job: str | None = None
         widget.bind("<Enter>", lambda _event: self._schedule(), add="+")
@@ -109,7 +112,7 @@ class Tooltip:
         self.window = tk.Toplevel(self.widget)
         self.window.wm_overrideredirect(True)
         self.window.wm_geometry(f"+{x}+{y}")
-        ttk.Label(self.window, text=text, style="Tooltip.TLabel", wraplength=360, justify=tk.LEFT).pack()
+        ttk.Label(self.window, text=text, style="Tooltip.TLabel", wraplength=self.wraplength, justify=tk.LEFT).pack()
 
     def hide(self) -> None:
         self._cancel()
@@ -121,6 +124,8 @@ class Tooltip:
 class App:
     def __init__(self, root: tk.Tk, config_path: Path, rules_path: Path) -> None:
         self.root = root
+        # Sizes in pixels are multiplied by this; 1.5 on a Windows screen at 150 % (see gui.ui_scale).
+        self.scale = ui_scale(root.winfo_fpixels("1i"))
         self.cfg_path = config_path
         self.rules_path = rules_path
         self.config_dir = config_path.resolve().parent
@@ -168,6 +173,10 @@ class App:
     def tr(self, key: str) -> str:
         return t(key, self.lang)
 
+    def px(self, pixels: int) -> int:
+        """A size in pixels, scaled like the fonts (Tk scales fonts by itself, plain pixel sizes not)."""
+        return round(pixels * self.scale)
+
     def _translate(self, widget: tk.Widget, key: str, option: str = "text") -> tk.Widget:
         """Set a widget's text and remember it, so a language switch can update it."""
         widget.configure(**{option: self.tr(key)})
@@ -179,7 +188,7 @@ class App:
         return self._translate(widget, key)
 
     def hint(self, parent, key: str, wrap: int = 560) -> ttk.Label:
-        return self.label(parent, key, style="Hint.TLabel", wraplength=wrap, justify=tk.LEFT)
+        return self.label(parent, key, style="Hint.TLabel", wraplength=self.px(wrap), justify=tk.LEFT)
 
     def button(
         self,
@@ -203,7 +212,7 @@ class App:
             hint = self.tr(key)
             return f"{hint} ({self.shortcuts[shortcut].label})" if shortcut else hint
 
-        Tooltip(widget, text)
+        Tooltip(widget, text, wraplength=self.px(360))
 
     def var(self, key: str, value: str | bool) -> tk.Variable:
         variable = tk.BooleanVar(value=value) if isinstance(value, bool) else tk.StringVar(value=value)
@@ -215,7 +224,7 @@ class App:
         return ttk.Entry(parent, textvariable=self.form[key], width=width, **options)
 
     def error_label(self, parent, key: str) -> ttk.Label:
-        widget = ttk.Label(parent, style="Error.TLabel", wraplength=520, justify=tk.LEFT)
+        widget = ttk.Label(parent, style="Error.TLabel", wraplength=self.px(520), justify=tk.LEFT)
         self.error_labels[key] = widget
         return widget
 
@@ -227,10 +236,10 @@ class App:
             self.root.iconphoto(True, self.app_icon)
         except (OSError, tk.TclError):
             pass  # a missing icon is cosmetic
-        width = min(1240, self.root.winfo_screenwidth() - 80)
-        height = min(860, self.root.winfo_screenheight() - 120)
+        width = min(self.px(1240), self.root.winfo_screenwidth() - self.px(80))
+        height = min(self.px(860), self.root.winfo_screenheight() - self.px(120))
         self.root.geometry(f"{width}x{height}")
-        self.root.minsize(min(900, width), min(620, height))
+        self.root.minsize(min(self.px(900), width), min(self.px(620), height))
 
     def _setup_styles(self) -> None:
         style = ttk.Style(self.root)
@@ -251,6 +260,8 @@ class App:
         style.configure("CardIcon.TLabel", font=self.heading_font)
         style.configure("Heading.TRadiobutton", font=self.heading_font)
         style.configure("TNotebook.Tab", padding=(14, 6))
+        # ttk does not grow table rows with the font; without this, rows overlap on scaled screens.
+        style.configure("Treeview", rowheight=base.metrics("linespace") + self.px(6))
         style.configure(
             "Tooltip.TLabel",
             background=TOOLTIP_BACKGROUND,
@@ -308,7 +319,7 @@ class App:
             icon = ttk.Label(cards, style="CardIcon.TLabel", width=2)
             icon.grid(row=row, column=0, sticky="w", pady=6)
             self.label(cards, title_key, style="Bold.TLabel").grid(row=row, column=1, sticky="w", padx=(4, 16))
-            text = ttk.Label(cards, wraplength=640, justify=tk.LEFT)
+            text = ttk.Label(cards, wraplength=self.px(640), justify=tk.LEFT)
             text.grid(row=row, column=2, sticky="w")
             self.button(cards, action_key, action, tip=tip, shortcut=shortcut).grid(
                 row=row, column=3, sticky="e", padx=(12, 0)
@@ -334,14 +345,14 @@ class App:
         self.hint(tab, "start.test_run_hint", wrap=760).pack(anchor="w", pady=(6, 0))
 
         self.progress_row = ttk.Frame(tab)
-        self.progress_bar = ttk.Progressbar(self.progress_row, mode="determinate", length=320)
+        self.progress_bar = ttk.Progressbar(self.progress_row, mode="determinate", length=self.px(320))
         self.progress_bar.pack(side=tk.LEFT)
         self.progress_label = ttk.Label(self.progress_row)
         self.progress_label.pack(side=tk.LEFT, padx=(12, 0))
         self.stop_button = self.button(self.progress_row, "button.stop", self.stop_run, tip="tip.stop")
         self.stop_button.pack(side=tk.LEFT, padx=(12, 0))
 
-        self.result_label = ttk.Label(tab, wraplength=900, justify=tk.LEFT, font=self.bold_font)
+        self.result_label = ttk.Label(tab, wraplength=self.px(900), justify=tk.LEFT, font=self.bold_font)
         self.result_label.pack(anchor="w", pady=(16, 0))
 
         # Mails that failed in the last run, each with a direct way to the rule that did not match.
@@ -353,8 +364,8 @@ class App:
         self.problems_view = ttk.Treeview(
             problem_list, columns=("mail", "problem"), show="headings", height=5, selectmode="browse"
         )
-        self.problems_view.column("mail", width=320, anchor="w")
-        self.problems_view.column("problem", width=520, anchor="w")
+        self.problems_view.column("mail", width=self.px(320), anchor="w")
+        self.problems_view.column("problem", width=self.px(520), anchor="w")
         problems_scroll = ttk.Scrollbar(problem_list, orient=tk.VERTICAL, command=self.problems_view.yview)
         self.problems_view.configure(yscrollcommand=problems_scroll.set)
         self.problems_view.pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -457,7 +468,7 @@ class App:
             test_row, "button.test_connection", self.test_connection, tip="tip.test_connection"
         )
         self.connection_button.pack(side=tk.LEFT)
-        self.connection_result = ttk.Label(test_row, wraplength=560, justify=tk.LEFT)
+        self.connection_result = ttk.Label(test_row, wraplength=self.px(560), justify=tk.LEFT)
         self.connection_result.pack(side=tk.LEFT, padx=(12, 0))
         self.imap_frame.columnconfigure(1, weight=1)
         self.password.trace_add("write", lambda *_args: self.refresh_cards())
@@ -483,7 +494,7 @@ class App:
             ("required", 50, "center"),
             ("result", 190, "w"),
         ):
-            self.fields_view.column(name, width=width, anchor=anchor)
+            self.fields_view.column(name, width=self.px(width), anchor=anchor)
         self.fields_view.tag_configure("missing_required", foreground=RED)
         self.fields_view.tag_configure("missing_optional", foreground=GRAY)
         self.fields_view.pack(fill=tk.BOTH, expand=True)
@@ -538,11 +549,11 @@ class App:
                 ttk.Entry(self.inputs, textvariable=self.field_vars["pattern"]),
             ),
         }
-        self.type_hint = ttk.Label(self.editor, style="Hint.TLabel", wraplength=560, justify=tk.LEFT)
+        self.type_hint = ttk.Label(self.editor, style="Hint.TLabel", wraplength=self.px(560), justify=tk.LEFT)
         self.type_hint.grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
-        self.editor_result = ttk.Label(self.editor, wraplength=560, justify=tk.LEFT, font=self.bold_font)
+        self.editor_result = ttk.Label(self.editor, wraplength=self.px(560), justify=tk.LEFT, font=self.bold_font)
         self.editor_result.grid(row=4, column=0, columnspan=3, sticky="w", pady=(8, 0))
-        self.editor_problem = ttk.Label(self.editor, wraplength=560, justify=tk.LEFT, foreground=AMBER)
+        self.editor_problem = ttk.Label(self.editor, wraplength=self.px(560), justify=tk.LEFT, foreground=AMBER)
         self.editor_problem.grid(row=5, column=0, columnspan=3, sticky="w")
         editor_buttons = ttk.Frame(self.editor)
         editor_buttons.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(10, 0))
@@ -570,7 +581,7 @@ class App:
         self.button(sample_actions, "button.sample_paste", self.paste_sample, tip="tip.sample_paste").pack(
             side=tk.LEFT, padx=(8, 0)
         )
-        self.sample_summary = ttk.Label(sample_pane, wraplength=440, justify=tk.LEFT, font=self.bold_font)
+        self.sample_summary = ttk.Label(sample_pane, wraplength=self.px(440), justify=tk.LEFT, font=self.bold_font)
         self.sample_summary.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
         self.hint(sample_pane, "preview.header_note", wrap=440).pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
         text_frame = ttk.Frame(sample_pane)
@@ -634,7 +645,7 @@ class App:
             width=12,
         ).grid(row=0, column=1, sticky="w")
         self._setting_row(technical, 1, "sqlite_path", "label.sqlite_path", "")
-        self.files_label = ttk.Label(technical, style="Hint.TLabel", wraplength=440, justify=tk.LEFT)
+        self.files_label = ttk.Label(technical, style="Hint.TLabel", wraplength=self.px(440), justify=tk.LEFT)
         self.files_label.grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self.var("dry_run", False)  # not shown: "Testlauf" decides per run; kept so the file value survives
 
@@ -1486,6 +1497,7 @@ class App:
 
 
 def run_app(config_path: Path, rules_path: Path) -> None:
+    enable_windows_dpi_awareness()  # before the first window; sharp text on scaled Windows screens
     root = tk.Tk()
     app = App(root, config_path, rules_path)
     try:
