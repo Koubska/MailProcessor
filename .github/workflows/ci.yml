@@ -1,5 +1,6 @@
-# Tests on every push and pull request. On a pushed tag, additionally builds the
+# Tests and lint on every push and pull request. On a pushed tag, additionally builds the
 # Windows, macOS (Apple Silicon) and Linux executables and publishes a GitHub release.
+# Dependencies come from uv.lock, so every build uses exactly the tested versions.
 name: CI
 
 on:
@@ -22,16 +23,31 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.12"
-      - run: python -m pip install -e . pytest
-      - run: pytest -q
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run --locked pytest -q
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run --locked ruff check src tests scripts
+      - name: Check the workflow files
+        run: uvx --from actionlint-py actionlint
 
   build:
     name: Build
     if: startsWith(github.ref, 'refs/tags/')
-    needs: test
+    needs: [test, lint]
     strategy:
       matrix:
         include:
@@ -44,11 +60,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.12"
-      - run: python -m pip install -e . pyinstaller
-      - run: python scripts/build_executable.py --target-platform ${{ matrix.platform }}
+          enable-cache: true
+      - name: Tag must match the version in pyproject.toml
+        run: uv run --no-project python scripts/check_version.py "${{ github.ref_name }}"
+      - run: uv sync --locked --group build
+      - run: uv run --locked python scripts/build_executable.py --target-platform ${{ matrix.platform }}
       - uses: actions/upload-artifact@v7
         with:
           name: mailprocessor-${{ matrix.platform }}
@@ -75,4 +94,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/mailprocessor-*.zip \
             --repo "$GITHUB_REPOSITORY" \
             --title "mailprocessor $GITHUB_REF_NAME" \
-            --notes "Downloads für Windows, macOS (Apple Silicon) und Linux: ZIP entpacken und das Programm doppelklicken."
+            --notes "Downloads für Windows, macOS (Apple Silicon) und Linux: ZIP entpacken und das Programm doppelklicken." \
+            --generate-notes

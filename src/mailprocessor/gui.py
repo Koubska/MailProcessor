@@ -203,7 +203,10 @@ def render_config_text(config: AppConfig) -> str:
 
 
 def path_setting(chosen: Path, config_dir: Path) -> str:
-    """Config value for a picked folder or file: relative if inside the config folder (keeps it portable), else absolute."""
+    """Config value for a picked folder or file.
+
+    Relative if inside the config folder (keeps the setup portable), else absolute.
+    """
     chosen, config_dir = chosen.resolve(), config_dir.resolve()
     if chosen.is_relative_to(config_dir):
         return f"./{chosen.relative_to(config_dir).as_posix()}".removesuffix("/.")

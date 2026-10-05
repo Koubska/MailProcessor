@@ -165,7 +165,9 @@ def test_main_without_arguments_opens_gui_with_files_next_to_executable(monkeypa
     monkeypatch.setattr(sys, "argv", [str(tmp_path / "mailprocessor")])
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", str(tmp_path / "mailprocessor"))
-    monkeypatch.setattr("mailprocessor.gui.launch_gui", lambda config_path, rules_path: calls.update(cfg=config_path, rules=rules_path))
+    monkeypatch.setattr(
+        "mailprocessor.gui.launch_gui", lambda config_path, rules_path: calls.update(cfg=config_path, rules=rules_path)
+    )
 
     main_module.main()
 

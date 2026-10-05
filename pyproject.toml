@@ -1,6 +1,6 @@
 [project]
 name = "mailprocessor"
-version = "2.1.0"
+version = "3.0.0"
 description = "Read-only mail processor with configurable body parsing and Excel export"
 readme = "README.md"
 license = "MIT"
@@ -13,7 +13,8 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest"]
+dev = ["pytest", "ruff"]
+build = ["pyinstaller"]
 
 [project.scripts]
 mailprocessor = "mailprocessor.main:main"
@@ -31,3 +32,11 @@ where = ["src"]
 [tool.setuptools.package-data]
 mailprocessor = ["defaults/*.toml", "assets/icon.png"]
 
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["B008"]  # typer.Option(...) as a default value is how typer declares options

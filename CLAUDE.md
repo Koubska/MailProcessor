@@ -9,21 +9,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+Dependencies are locked in `uv.lock` (committed; CI installs with `--locked`). Groups: `dev` (pytest, ruff, installed by default), `build` (pyinstaller).
+
 ```bash
-python -m venv .venv && . .venv/bin/activate
-pip install -e . pytest          # pytest is not a declared dependency
+uv sync                                            # .venv with the app and the dev tools, from uv.lock
 
-pytest -q                                          # full suite (run from repo root; some tests read repo files by relative path)
-pytest tests/test_parser.py -q                     # one file
-pytest tests/test_parser.py::test_name -q          # one test
+uv run pytest -q                                   # full suite (run from repo root; some tests read repo files by relative path)
+uv run pytest tests/test_parser.py -q              # one file
+uv run pytest tests/test_parser.py::test_name -q   # one test
+uv run ruff check src tests scripts                # lint (rules in pyproject.toml, line length 120)
+uvx --from actionlint-py actionlint                # check the workflow files
 
-mailprocessor --config ./config.toml --rules ./parsing_rules.toml [--dry-run] [--max-age-days N]
-mailprocessor                                      # no arguments: opens the GUI (config files from the cwd, or next to the frozen exe)
+uv run mailprocessor --config ./config.toml --rules ./parsing_rules.toml [--dry-run] [--max-age-days N]
+uv run mailprocessor                               # no arguments: opens the GUI (config files from the cwd, or next to the frozen exe)
 
-python scripts/build_executable.py --target-platform {linux|macos|windows}   # PyInstaller one-file bundle -> dist/mailprocessor-<platform>.zip
+uv sync --group build && uv run python scripts/build_executable.py --target-platform {linux|macos|windows}
+                                                   # PyInstaller one-file bundle -> dist/mailprocessor-<platform>.zip
+uv lock --upgrade                                  # update all locked versions (Dependabot does this weekly as a PR)
 ```
 
-The app icon lives in `src/mailprocessor/assets/` (`icon.png` for the Tk window, also package data and `--add-data`; `icon.ico`/`icon.icns` for the Windows/macOS executables). The build script refuses to cross-compile, so `--target-platform` must match the host. No linter or type checker is configured.
+The app icon lives in `src/mailprocessor/assets/` (`icon.png` for the Tk window, also package data and `--add-data`; `icon.ico`/`icon.icns` for the Windows/macOS executables). The build script refuses to cross-compile, so `--target-platform` must match the host. No type checker is configured.
 
 ## Architecture
 
@@ -45,4 +50,4 @@ source (sources/*.py) → NormalizedMail (models.py) → parser.parse_mail → l
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`): `test` runs `pytest -q` on Ubuntu, Windows and macOS for every push and pull request. Only for tags, `build` (needs `test`) builds the three ZIPs (macOS on `macos-latest`, i.e. Apple Silicon), and `release` (needs `build`) creates the GitHub release with `gh release create`, attaching the ZIPs. Release a version by bumping `version` in `pyproject.toml`, then `git tag -a X.Y -m "X.Y" && git push origin X.Y`. `tests/test_github_workflow.py` and `tests/test_build_executable.py` assert parts of this structure (tag gating, job order, executable names, generated `RUNNING.md`), so update them when you change the workflow or the build script. Check workflow edits with `uvx --from actionlint-py actionlint .github/workflows/ci.yml`.
+GitHub Actions (`.github/workflows/ci.yml`), all installs from `uv.lock`: `test` runs `pytest -q` on Ubuntu, Windows and macOS and `lint` runs ruff and actionlint, for every push and pull request. Only for tags, `build` (needs both) first checks that the tag matches `version` in `pyproject.toml` (`scripts/check_version.py`; tag `3.1` = version `3.1.0`), then builds the three ZIPs (macOS on `macos-latest`, i.e. Apple Silicon), and `release` (needs `build`) creates the GitHub release with `gh release create --generate-notes`, attaching the ZIPs. Release a version by bumping `version` in `pyproject.toml`, committing, then `git tag -a X.Y -m "X.Y" && git push origin X.Y`. `.github/dependabot.yml` opens one grouped update PR per week for the Python packages (`uv.lock`) and for the actions. `tests/test_github_workflow.py` and `tests/test_build_executable.py` assert parts of this structure (tag gating, job order, version check, locked installs, executable names, generated `RUNNING.md`), so update them when you change the workflow or the build script.

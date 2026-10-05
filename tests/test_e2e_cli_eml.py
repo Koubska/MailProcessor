@@ -175,7 +175,7 @@ def test_cli_eml_many_messages_does_not_duplicate_processed_rows(tmp_path: Path)
     data_sheet = workbook["daten"]
     assert data_sheet.max_row == total_messages + 1
     assert workbook["fehler"].max_row == 1
-    phone_values_first_run = [data_sheet.cell(row=row_index, column=5).value for row_index in range(2, total_messages + 2)]
+    phone_values_first_run = [data_sheet.cell(row=row, column=5).value for row in range(2, total_messages + 2)]
     assert len(phone_values_first_run) == total_messages
     assert len(set(phone_values_first_run)) == total_messages
 
@@ -190,7 +190,7 @@ def test_cli_eml_many_messages_does_not_duplicate_processed_rows(tmp_path: Path)
     data_sheet = workbook["daten"]
     assert data_sheet.max_row == total_messages + 1
     assert workbook["fehler"].max_row == 1
-    phone_values_second_run = [data_sheet.cell(row=row_index, column=5).value for row_index in range(2, total_messages + 2)]
+    phone_values_second_run = [data_sheet.cell(row=row, column=5).value for row in range(2, total_messages + 2)]
     assert phone_values_second_run == phone_values_first_run
 
 

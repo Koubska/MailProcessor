@@ -80,6 +80,10 @@ def _append_text_row(sheet: Worksheet, values: list[object]) -> None:
             cell.data_type = "s"
 
 
+def _locked_message(path: Path) -> str:
+    return f"Cannot write {path}. Is it open in Excel? Close it and run again."
+
+
 class ExcelOutput:
     """In-memory workbook that is written to disk once, atomically, via `save()`."""
 
@@ -125,7 +129,7 @@ class ExcelOutput:
             with self.path.open("r+b"):
                 pass
         except PermissionError:
-            raise WorkbookLockedError(f"Cannot write {self.path}. Is it open in Excel? Close it and run again.") from None
+            raise WorkbookLockedError(_locked_message(self.path)) from None
 
     def append_data(self, values: dict[str, str], content: str) -> None:
         row = [values.get(column, "") for column in self.data_columns]
@@ -157,6 +161,6 @@ class ExcelOutput:
             self.workbook.save(temp_path)
             os.replace(temp_path, self.path)
         except PermissionError:
-            raise WorkbookLockedError(f"Cannot write {self.path}. Is it open in Excel? Close it and run again.") from None
+            raise WorkbookLockedError(_locked_message(self.path)) from None
         finally:
             temp_path.unlink(missing_ok=True)

@@ -122,7 +122,8 @@ def test_pipeline_runs_never_modify_the_mailbox_and_are_idempotent(imap_server, 
 
     assert (first.processed, first.skipped) == (2, 0)
     assert (second.processed, second.skipped) == (0, 2)
-    assert [row[0].value for row in load_workbook(tmp_path / "out.xlsx")["daten"].iter_rows()] == ["Name", "Anna", "Ben"]
+    rows = load_workbook(tmp_path / "out.xlsx")["daten"].iter_rows()
+    assert [row[0].value for row in rows] == ["Name", "Anna", "Ben"]
 
     # Mailbox completely unchanged: same messages, same flags (no \Seen added), same content.
     assert state.messages == original
