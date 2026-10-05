@@ -125,22 +125,39 @@ Do not identify messages by sender + subject or sender + timestamp + subject alo
 
 # 8. Parsing
 
-Extraction rules are configured in `parsing_rules.toml` as a list of fields:
+Extraction rules are configured in `parsing_rules.toml` as a list of fields, one per Excel column. Users describe what to look for; the app generates the regular expression (`rule_patterns.py`):
+
+| `type` | GUI name | Inputs | Value |
+|---|---|---|---|
+| `label` | Text nach Bezeichnung | `label` | rest of the line after the label |
+| `next_line` | Wert in nächster Zeile | `label` | next non-empty line after a line holding only the label |
+| `between` | Text zwischen zwei Stellen | `start`, `end` | shortest text between them, also across line breaks |
+| `email` | E-Mail-Adresse | `label` (optional) | e-mail address in the label's line; without label the first address in the text |
+| `regex` | Experte (Regex) | `pattern` | group 1 of a Python regular expression (whole match without groups) |
 
 ```toml
 [[fields]]
+column = "Mail-Adresse"
+type = "email"
+label = ["Von", "From"]   # alternatives; a single label can be a plain string
+required = true
+
+[[fields]]
 column = "Kurs"
-pattern = "(?im)^\\s*Angebot:\\s*(.+?)\\s*$"
+type = "label"
+label = "Angebot:"
 required = true
 ```
 
-* `pattern` is a Python regular expression, matched against the email text followed by the email's header lines (`Name: value`). Text comes first, so a label in the text wins over a header; headers are the fallback (e.g. the sender in `From:`). The first capture group is the value; without a group, the whole match is used. Whitespace in the value is collapsed.
+* Labels are matched tolerantly: case-insensitive, any spacing, optional colon, at the start of a line, and not as a word prefix ("Tag" does not match "Tagesordnung:"). `label` and `email` never take a value from the next line. Inputs are matched literally (escaped).
+* A rule without `type` is a `regex` rule, so files from before the simple types keep working. The GUI writes only the inputs of each rule's type. "Als Regex bearbeiten" converts a simple rule into a `regex` rule; this is one-way.
+* Rules are matched against the email text followed by the email's header lines (`Name: value`). Text comes first, so a label in the text wins over a header; headers are the fallback (e.g. the sender in `From:`). Whitespace in the value is collapsed.
 * The default rules extract all fields from `docs/example.eml`; `tests/test_default_rules.py` guards this.
-* Invalid patterns and duplicate column names are rejected when the rules are loaded.
+* Missing inputs for a type, invalid patterns and duplicate column names are rejected when the rules are loaded; the GUI explains them in plain language.
 * A missing required field is a parsing error for that message. Missing values are never treated as valid.
 * Parsing is deterministic and independent of the mail source and of Excel.
 
-Prefer label-based patterns (`^Telefonnummer:\s*(.+)$`) over fragile positions.
+Prefer the simple types over `regex`, and labels over fragile positions.
 
 ---
 

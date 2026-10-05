@@ -26,7 +26,46 @@ CATALOG: dict[str, dict[str, str]] = {
         "label.max_messages": "Max. neue Nachrichten pro Lauf (0 = alle)",
         "label.source_type": "Quelltyp",
         "label.field_column": "Spalte",
-        "label.field_pattern": "Pattern",
+        "label.field_pattern": "Regulärer Ausdruck",
+        "label.field_type": "Art",
+        "label.field_labels": "Bezeichnung",
+        "label.field_labels_optional": "Bezeichnung (optional)",
+        "label.field_start": "Anfang",
+        "label.field_end": "Ende",
+        "button.as_regex": "Als Regex bearbeiten",
+        "rule.type.label": "Text nach Bezeichnung",
+        "rule.type.next_line": "Wert in nächster Zeile",
+        "rule.type.between": "Text zwischen zwei Stellen",
+        "rule.type.email": "E-Mail-Adresse",
+        "rule.type.regex": "Experte (Regex)",
+        "rule.hint.label": (
+            "Übernimmt den Rest der Zeile nach der Bezeichnung, z. B. „Telefonnummer:“. "
+            "Groß-/Kleinschreibung, Leerzeichen und der Doppelpunkt sind egal. Mehrere Bezeichnungen mit ; trennen."
+        ),
+        "rule.hint.next_line": (
+            "Die Bezeichnung steht allein in einer Zeile, der Wert in der nächsten. "
+            "Mehrere Bezeichnungen mit ; trennen."
+        ),
+        "rule.hint.between": "Übernimmt den Text zwischen Anfang und Ende, auch über Zeilenumbrüche hinweg.",
+        "rule.hint.email": (
+            "Findet die E-Mail-Adresse in der Zeile mit der Bezeichnung, z. B. „Von“. "
+            "Ohne Bezeichnung: die erste Adresse im Text. Mehrere Bezeichnungen mit ; trennen."
+        ),
+        "rule.hint.regex": (
+            "Regulärer Ausdruck (Python). Die erste Klammergruppe ( ) ist der Wert. "
+            "Wird nicht mehr in eine einfache Regel zurückverwandelt."
+        ),
+        "rule.or": " oder ",
+        "rule.describe.label": "Zeile nach {labels}",
+        "rule.describe.next_line": "Zeile unter {labels}",
+        "rule.describe.between": "Zwischen {start} und {end}",
+        "rule.describe.email": "E-Mail-Adresse in der Zeile {labels}",
+        "rule.describe.email_anywhere": "Erste E-Mail-Adresse im Text",
+        "error.rule.column": "Bitte einen Spaltennamen eingeben.",
+        "error.rule.duplicate": "Die Spalte „{column}“ gibt es schon. Bitte einen anderen Namen wählen.",
+        "error.rule.label": "Bitte eine Bezeichnung eingeben, z. B. „Telefonnummer:“.",
+        "error.rule.between": "Bitte Anfang und Ende eingeben.",
+        "error.rule.pattern": "Bitte einen regulären Ausdruck eingeben.",
         "label.field_required": "Pflichtfeld",
         "label.status.ready": "Bereit.",
         "label.status.saved": "config.toml und parsing_rules.toml gespeichert.",
@@ -59,7 +98,8 @@ CATALOG: dict[str, dict[str, str]] = {
         "source.imap.use_ssl": "SSL verwenden",
         "view.field.column": "Spalte",
         "view.field.required": "Pflicht",
-        "view.field.pattern": "Pattern",
+        "view.field.type": "Art",
+        "view.field.description": "Sucht nach",
         "view.field.required_yes": "ja",
         "view.field.required_no": "nein",
         "error.select_field_remove": "Bitte ein Feld zum Entfernen auswählen",
@@ -139,7 +179,45 @@ CATALOG: dict[str, dict[str, str]] = {
         "label.max_messages": "Max new messages per run (0 = all)",
         "label.source_type": "Source type",
         "label.field_column": "Column",
-        "label.field_pattern": "Pattern",
+        "label.field_pattern": "Regular expression",
+        "label.field_type": "Type",
+        "label.field_labels": "Label",
+        "label.field_labels_optional": "Label (optional)",
+        "label.field_start": "Start",
+        "label.field_end": "End",
+        "button.as_regex": "Edit as regex",
+        "rule.type.label": "Text after label",
+        "rule.type.next_line": "Value on next line",
+        "rule.type.between": "Text between two phrases",
+        "rule.type.email": "Email address",
+        "rule.type.regex": "Expert (regex)",
+        "rule.hint.label": (
+            "Takes the rest of the line after the label, e.g. “Phone:”. "
+            "Case, spaces and the colon do not matter. Separate several labels with ;."
+        ),
+        "rule.hint.next_line": (
+            "The label stands alone on a line, the value on the next one. Separate several labels with ;."
+        ),
+        "rule.hint.between": "Takes the text between start and end, also across line breaks.",
+        "rule.hint.email": (
+            "Finds the email address in the line with the label, e.g. “From”. "
+            "Without a label: the first address in the text. Separate several labels with ;."
+        ),
+        "rule.hint.regex": (
+            "Regular expression (Python). The first group ( ) is the value. "
+            "It is not turned back into a simple rule."
+        ),
+        "rule.or": " or ",
+        "rule.describe.label": "Line after {labels}",
+        "rule.describe.next_line": "Line below {labels}",
+        "rule.describe.between": "Between {start} and {end}",
+        "rule.describe.email": "Email address in the line {labels}",
+        "rule.describe.email_anywhere": "First email address in the text",
+        "error.rule.column": "Enter a column name.",
+        "error.rule.duplicate": "The column “{column}” already exists. Choose another name.",
+        "error.rule.label": "Enter a label, e.g. “Phone:”.",
+        "error.rule.between": "Enter a start and an end text.",
+        "error.rule.pattern": "Enter a regular expression.",
         "label.field_required": "Required",
         "label.status.ready": "Ready.",
         "label.status.saved": "Saved config.toml and parsing_rules.toml.",
@@ -172,7 +250,8 @@ CATALOG: dict[str, dict[str, str]] = {
         "source.imap.use_ssl": "Use SSL",
         "view.field.column": "Column",
         "view.field.required": "Required",
-        "view.field.pattern": "Pattern",
+        "view.field.type": "Type",
+        "view.field.description": "Looks for",
         "view.field.required_yes": "yes",
         "view.field.required_no": "no",
         "error.select_field_remove": "Select a field row to remove",

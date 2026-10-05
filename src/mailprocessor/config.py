@@ -8,9 +8,10 @@ from importlib import resources
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from mailprocessor.excel_writer import CONTENT_COLUMN
+from mailprocessor.rule_patterns import LABEL_TYPES, RuleType, build_pattern
 
 
 class AppSection(BaseModel):
@@ -66,17 +67,45 @@ class AppConfig(BaseModel):
 
 
 class FieldRule(BaseModel):
+    """One Excel column. Simple types are described by labels/texts; `regex` takes a hand-written pattern."""
+
     column: str = Field(min_length=1)
-    pattern: str = Field(min_length=1)
+    # Rules written before the simple types existed have only a pattern, so "regex" is the default.
+    type: RuleType = "regex"
+    label: list[str] = Field(default_factory=list)
+    start: str | None = None
+    end: str | None = None
+    pattern: str | None = None
     required: bool = True
 
+    @field_validator("label", mode="before")
+    @classmethod
+    def label_as_list(cls, value: object) -> object:
+        """Accept a single label or a list; drop empty entries."""
+        if isinstance(value, str):
+            value = [value]
+        if isinstance(value, list):
+            return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+        return value
+
     @model_validator(mode="after")
-    def validate_pattern_compiles(self) -> FieldRule:
+    def validate_inputs_for_type(self) -> FieldRule:
+        if self.type in LABEL_TYPES - {"email"} and not self.label:
+            raise ValueError(f"Column '{self.column}': a label is required")
+        if self.type == "between" and not ((self.start or "").strip() and (self.end or "").strip()):
+            raise ValueError(f"Column '{self.column}': start and end text are required")
+        if self.type == "regex" and not self.pattern:
+            raise ValueError(f"Column '{self.column}': a pattern is required")
         try:
-            re.compile(self.pattern)
+            re.compile(self.regex)
         except re.error as exc:
             raise ValueError(f"Invalid regex pattern for column '{self.column}': {exc}") from None
         return self
+
+    @property
+    def regex(self) -> str:
+        """The pattern the parser runs; generated for the simple types."""
+        return build_pattern(self.type, labels=self.label, start=self.start, end=self.end, pattern=self.pattern)
 
 
 class ParsingRules(BaseModel):

@@ -31,8 +31,9 @@ py -3 -m venv .venv; .venv\Scripts\pip install -q -e .; .venv\Scripts\mailproces
 1. Reiter **App-Konfiguration**: Quelle wählen. Entweder **eml** (gespeicherte `.eml`-Dateien im Ordner
    `mails`, oder mit **Durchsuchen …** einen anderen Ordner wählen) oder **imap** (Ihr Postfach; das
    Passwort wird nie gespeichert).
-2. Reiter **Parsing-Felder**: eine Regel pro Excel-Spalte. Der Teil des Patterns in `( )` wird übernommen.
-   Die Standardregeln passen zu [docs/example.eml](docs/example.eml).
+2. Reiter **Parsing-Felder**: eine Regel pro Excel-Spalte. Unter **Art** wählen, wie der Wert gefunden wird,
+   z. B. **Text nach Bezeichnung** mit der Bezeichnung `Telefonnummer:`. Die Standardregeln passen zu
+   [docs/example.eml](docs/example.eml).
 3. Auf **Ausführen** klicken.
 
 Die Ergebnisse landen in `out/mail_export.xlsx`: Das Blatt **daten** enthält eine Zeile pro E-Mail; die

@@ -13,14 +13,16 @@ import sys
 import threading
 import time
 import tomllib
-from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from mailprocessor.config import (
     AppConfig,
     AppSection,
     EmlSourceConfig,
+    FieldRule,
     ImapSourceConfig,
     ParsingRules,
     SourceConfig,
@@ -38,6 +40,7 @@ from mailprocessor.errors import (
 from mailprocessor.i18n import resolve_language, t
 from mailprocessor.logfile import attach_log_file, log_file_path
 from mailprocessor.processor import RunSummary, run_pipeline, start_over
+from mailprocessor.rule_patterns import LABEL_TYPES, RULE_TYPES, RuleType
 
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(message)s"
 
@@ -57,23 +60,77 @@ class QueueLogHandler(logging.Handler):
             self.handleError(record)
 
 
-@dataclass(frozen=True)
-class UiFieldRule:
-    column: str
-    pattern: str
-    required: bool
-
-
 def _read_text_or_empty(path: Path) -> str:
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8")
 
 
-def parse_rules_text(text: str) -> list[UiFieldRule]:
+def parse_rules_text(text: str) -> list[FieldRule]:
     raw = tomllib.loads(text) if text.strip() else {"fields": []}
-    rules = ParsingRules.model_validate(raw)
-    return [UiFieldRule(column=item.column, pattern=item.pattern, required=item.required) for item in rules.fields]
+    return ParsingRules.model_validate(raw).fields
+
+
+def split_labels(text: str) -> list[str]:
+    """Several labels are typed separated by ";"."""
+    return [part.strip() for part in text.split(";") if part.strip()]
+
+
+def _quote(text: str, lang: str) -> str:
+    return f"„{text}“" if lang == "de" else f"“{text}”"
+
+
+def describe_rule(rule: FieldRule, lang: str) -> str:
+    """What a rule looks for, in words, for the rule list."""
+    if rule.type == "regex":
+        return rule.pattern or ""
+    if rule.type == "between":
+        start, end = _quote(rule.start or "", lang), _quote(rule.end or "", lang)
+        return t("rule.describe.between", lang).format(start=start, end=end)
+    labels = t("rule.or", lang).join(_quote(label, lang) for label in rule.label)
+    if rule.type == "email" and not rule.label:
+        return t("rule.describe.email_anywhere", lang)
+    return t(f"rule.describe.{rule.type}", lang).format(labels=labels)
+
+
+def rule_from_inputs(
+    *,
+    column: str,
+    rule_type: RuleType,
+    labels_text: str = "",
+    start: str = "",
+    end: str = "",
+    pattern: str = "",
+    required: bool = True,
+    other_columns: list[str] | None = None,
+    lang: str = "de",
+) -> FieldRule:
+    """Build a rule from the editor inputs, with messages users understand. Only this type's inputs are kept."""
+    column = column.strip()
+    labels = split_labels(labels_text)
+    if not column:
+        raise ValueError(t("error.rule.column", lang))
+    if column in (other_columns or []):
+        raise ValueError(t("error.rule.duplicate", lang).format(column=column))
+    if rule_type in LABEL_TYPES - {"email"} and not labels:
+        raise ValueError(t("error.rule.label", lang))
+    if rule_type == "between" and not (start.strip() and end.strip()):
+        raise ValueError(t("error.rule.between", lang))
+    if rule_type == "regex" and not pattern.strip():
+        raise ValueError(t("error.rule.pattern", lang))
+    try:
+        return FieldRule(
+            column=column,
+            type=rule_type,
+            label=labels if rule_type in LABEL_TYPES else [],
+            start=start.strip() if rule_type == "between" else None,
+            end=end.strip() if rule_type == "between" else None,
+            pattern=pattern.strip() if rule_type == "regex" else None,
+            required=required,
+        )
+    except ValidationError as exc:
+        # e.g. an invalid regex; pydantic's message without its decoration
+        raise ValueError(exc.errors()[0]["msg"].removeprefix("Value error, ")) from None
 
 
 def parse_config_text(text: str) -> AppConfig:
@@ -87,18 +144,23 @@ def _toml_escape(value: str) -> str:
     return json.dumps(value, ensure_ascii=False).replace("\x7f", "\\u007F")
 
 
-def render_rules_text(fields: list[UiFieldRule]) -> str:
+def render_rules_text(fields: list[FieldRule]) -> str:
+    """Write only the inputs that belong to each rule's type; regex rules keep the original format."""
     lines: list[str] = []
     for field in fields:
-        lines.extend(
-            [
-                "[[fields]]",
-                f"column = {_toml_escape(field.column)}",
-                f"pattern = {_toml_escape(field.pattern)}",
-                f"required = {'true' if field.required else 'false'}",
-                "",
-            ]
-        )
+        lines.extend(["[[fields]]", f"column = {_toml_escape(field.column)}"])
+        if field.type != "regex":
+            lines.append(f"type = {_toml_escape(field.type)}")
+        if field.type in LABEL_TYPES and field.label:
+            if len(field.label) == 1:
+                lines.append(f"label = {_toml_escape(field.label[0])}")
+            else:
+                lines.append(f"label = [{', '.join(_toml_escape(label) for label in field.label)}]")
+        if field.type == "between":
+            lines.extend([f"start = {_toml_escape(field.start or '')}", f"end = {_toml_escape(field.end or '')}"])
+        if field.type == "regex":
+            lines.append(f"pattern = {_toml_escape(field.pattern or '')}")
+        lines.extend([f"required = {'true' if field.required else 'false'}", ""])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -286,7 +348,7 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
     notebook.add(config_tab, text=tr("tab.config"))
     notebook.add(fields_tab, text=tr("tab.fields"))
 
-    fields: list[UiFieldRule] = []
+    fields: list[FieldRule] = []
 
     form = ttk.Frame(config_tab)
     form.pack(fill=tk.BOTH, expand=True)
@@ -449,31 +511,81 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
 
     rules_file_label = ttk.Label(fields_tab, text=f"{tr('label.rules_file')}: {rules_file}")
     rules_file_label.pack(anchor="w")
-    fields_view = ttk.Treeview(fields_tab, columns=("column", "required", "pattern"), show="headings", height=10)
-    fields_view.heading("column", text=tr("view.field.column"))
-    fields_view.heading("required", text=tr("view.field.required"))
-    fields_view.heading("pattern", text=tr("view.field.pattern"))
-    fields_view.column("column", width=180, anchor="w")
-    fields_view.column("required", width=90, anchor="center")
-    fields_view.column("pattern", width=620, anchor="w")
+    view_columns = ("column", "type", "description", "required")
+    fields_view = ttk.Treeview(fields_tab, columns=view_columns, show="headings", height=10)
+    view_layout = (("column", 160, "w"), ("type", 190, "w"), ("description", 480, "w"), ("required", 70, "center"))
+    for name, width, anchor in view_layout:
+        fields_view.column(name, width=width, anchor=anchor)
     fields_view.pack(fill=tk.BOTH, expand=True, pady=(6, 8))
 
-    editor_row = ttk.Frame(fields_tab)
-    editor_row.pack(fill=tk.X, pady=(0, 8))
-    field_column_label = ttk.Label(editor_row, text=tr("label.field_column"))
-    field_column_label.grid(row=0, column=0, sticky="w")
-    field_pattern_label = ttk.Label(editor_row, text=tr("label.field_pattern"))
-    field_pattern_label.grid(row=0, column=1, sticky="w", padx=(8, 0))
+    # Editor: column, type and required on top; below only the inputs the chosen type needs.
+    editor = ttk.Frame(fields_tab)
+    editor.pack(fill=tk.X, pady=(0, 8))
     field_column_var = tk.StringVar()
+    field_labels_var = tk.StringVar()
+    field_start_var = tk.StringVar()
+    field_end_var = tk.StringVar()
     field_pattern_var = tk.StringVar()
     field_required_var = tk.BooleanVar(value=True)
-    ttk.Entry(editor_row, textvariable=field_column_var, width=24).grid(row=1, column=0, sticky="ew")
-    ttk.Entry(editor_row, textvariable=field_pattern_var, width=80).grid(row=1, column=1, sticky="ew", padx=(8, 0))
-    field_required_checkbox = ttk.Checkbutton(editor_row, text=tr("label.field_required"), variable=field_required_var)
-    field_required_checkbox.grid(
-        row=1, column=2, sticky="w", padx=(8, 0)
-    )
-    editor_row.columnconfigure(1, weight=1)
+    field_type: list[RuleType] = ["label"]  # current editor type; a list so nested functions can change it
+
+    field_column_label = ttk.Label(editor, text=tr("label.field_column"))
+    field_column_label.grid(row=0, column=0, sticky="w", padx=(0, 8))
+    ttk.Entry(editor, textvariable=field_column_var, width=24).grid(row=0, column=1, sticky="w")
+    field_type_label = ttk.Label(editor, text=tr("label.field_type"))
+    field_type_label.grid(row=0, column=2, sticky="w", padx=(16, 8))
+    field_type_box = ttk.Combobox(editor, state="readonly", width=28)
+    field_type_box.grid(row=0, column=3, sticky="w")
+    field_required_checkbox = ttk.Checkbutton(editor, text=tr("label.field_required"), variable=field_required_var)
+    field_required_checkbox.grid(row=0, column=4, sticky="w", padx=(16, 0))
+
+    inputs = ttk.Frame(editor)
+    inputs.grid(row=1, column=0, columnspan=6, sticky="ew", pady=(8, 0))
+    inputs.columnconfigure(1, weight=1)
+    labels_label = ttk.Label(inputs)
+    labels_entry = ttk.Entry(inputs, textvariable=field_labels_var)
+    start_label = ttk.Label(inputs, text=tr("label.field_start"))
+    start_entry = ttk.Entry(inputs, textvariable=field_start_var)
+    end_label = ttk.Label(inputs, text=tr("label.field_end"))
+    end_entry = ttk.Entry(inputs, textvariable=field_end_var)
+    pattern_label = ttk.Label(inputs, text=tr("label.field_pattern"))
+    pattern_entry = ttk.Entry(inputs, textvariable=field_pattern_var)
+    rule_hint = ttk.Label(editor, foreground="gray", wraplength=900, justify=tk.LEFT)
+    rule_hint.grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
+    as_regex_button = ttk.Button(editor, command=lambda: convert_to_regex())
+    editor.columnconfigure(5, weight=1)
+
+    def show_type_inputs() -> None:
+        for widget in inputs.winfo_children():
+            widget.grid_forget()
+        rule_type = field_type[0]
+        if rule_type in LABEL_TYPES:
+            key = "label.field_labels_optional" if rule_type == "email" else "label.field_labels"
+            labels_label.configure(text=tr(key))
+            labels_label.grid(row=0, column=0, sticky="w", padx=(0, 8))
+            labels_entry.grid(row=0, column=1, sticky="ew")
+        elif rule_type == "between":
+            start_label.grid(row=0, column=0, sticky="w", padx=(0, 8))
+            start_entry.grid(row=0, column=1, sticky="ew")
+            end_label.grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
+            end_entry.grid(row=1, column=1, sticky="ew", pady=(6, 0))
+        else:
+            pattern_label.grid(row=0, column=0, sticky="w", padx=(0, 8))
+            pattern_entry.grid(row=0, column=1, sticky="ew")
+        rule_hint.configure(text=tr(f"rule.hint.{rule_type}"))
+        if rule_type == "regex":
+            as_regex_button.grid_forget()
+        else:
+            as_regex_button.grid(row=2, column=5, sticky="e", pady=(4, 0))
+
+    def set_field_type(rule_type: RuleType) -> None:
+        field_type[0] = rule_type
+        field_type_box.current(RULE_TYPES.index(rule_type))
+        show_type_inputs()
+
+    def on_type_selected() -> None:
+        field_type[0] = RULE_TYPES[field_type_box.current()]
+        show_type_inputs()
 
     status_var = tk.StringVar(value=tr("label.status.ready"))
     output_frame = ttk.Frame(container)
@@ -507,8 +619,9 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
                 iid=str(index),
                 values=(
                     field.column,
+                    tr(f"rule.type.{field.type}"),
+                    describe_rule(field, current_language),
                     tr("view.field.required_yes") if field.required else tr("view.field.required_no"),
-                    field.pattern,
                 ),
             )
 
@@ -535,11 +648,16 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
         imap_mailbox_label.configure(text=tr("source.imap.mailbox"))
         imap_sender_filter_label.configure(text=tr("source.imap.sender_filter"))
         imap_ssl_checkbox.configure(text=tr("source.imap.use_ssl"))
-        fields_view.heading("column", text=tr("view.field.column"))
-        fields_view.heading("required", text=tr("view.field.required"))
-        fields_view.heading("pattern", text=tr("view.field.pattern"))
+        for name in view_columns:
+            fields_view.heading(name, text=tr(f"view.field.{name}"))
         field_column_label.configure(text=tr("label.field_column"))
-        field_pattern_label.configure(text=tr("label.field_pattern"))
+        field_type_label.configure(text=tr("label.field_type"))
+        field_type_box.configure(values=[tr(f"rule.type.{rule_type}") for rule_type in RULE_TYPES])
+        start_label.configure(text=tr("label.field_start"))
+        end_label.configure(text=tr("label.field_end"))
+        pattern_label.configure(text=tr("label.field_pattern"))
+        as_regex_button.configure(text=tr("button.as_regex"))
+        set_field_type(field_type[0])
         field_required_checkbox.configure(text=tr("label.field_required"))
         save_button.configure(text=tr("button.save"))
         reload_button.configure(text=tr("button.reload"))
@@ -646,21 +764,46 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
             return
         selected = fields[index]
         field_column_var.set(selected.column)
-        field_pattern_var.set(selected.pattern)
+        field_labels_var.set("; ".join(selected.label))
+        field_start_var.set(selected.start or "")
+        field_end_var.set(selected.end or "")
+        field_pattern_var.set(selected.pattern or "")
         field_required_var.set(selected.required)
+        set_field_type(selected.type)
+
+    def rule_from_editor() -> FieldRule:
+        index = selected_index()
+        return rule_from_inputs(
+            column=field_column_var.get(),
+            rule_type=field_type[0],
+            labels_text=field_labels_var.get(),
+            start=field_start_var.get(),
+            end=field_end_var.get(),
+            pattern=field_pattern_var.get(),
+            required=field_required_var.get(),
+            other_columns=[field.column for position, field in enumerate(fields) if position != index],
+            lang=current_language,
+        )
+
+    def convert_to_regex() -> None:
+        """Turn the rule in the editor into a hand-editable pattern (one way: regex is not turned back)."""
+        try:
+            rule = rule_from_editor()
+        except ValueError as exc:
+            messagebox.showerror(tr("app.title"), str(exc))
+            return
+        field_pattern_var.set(rule.regex)
+        set_field_type("regex")
 
     def upsert_current_field() -> None:
-        column = field_column_var.get().strip()
-        pattern = field_pattern_var.get().strip()
-        if not column or not pattern:
-            raise ValueError("Column and pattern are required")
-        candidate = UiFieldRule(column=column, pattern=pattern, required=field_required_var.get())
+        candidate = rule_from_editor()
         index = selected_index()
         updated = [*fields, candidate] if index is None else [*fields[:index], candidate, *fields[index + 1 :]]
-        # Same validation as loading the rules file: valid regex, unique column names.
-        ParsingRules.model_validate({"fields": [vars(field) for field in updated]})
+        # Same validation as loading the rules file (e.g. the reserved column name).
+        ParsingRules(fields=updated)
         fields[:] = updated
         refresh_fields_view()
+        fields_view.selection_set(str(updated.index(candidate)))
 
     def add_field() -> None:
         try:
@@ -860,6 +1003,7 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
     down_button = ttk.Button(field_buttons, text=tr("button.field_down"), command=lambda: move_field(1))
     down_button.pack(side=tk.LEFT, padx=(8, 0))
     fields_view.bind("<<TreeviewSelect>>", lambda _event: load_selected_field())
+    field_type_box.bind("<<ComboboxSelected>>", lambda _event: on_type_selected())
     source_type_var.trace_add("write", lambda *_args: toggle_source_frame())
     language_selector.bind("<<ComboboxSelected>>", lambda _event: apply_language(language_var.get()))
 

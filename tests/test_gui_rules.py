@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import mailprocessor.gui as gui_module
+from mailprocessor.config import FieldRule
 from mailprocessor.errors import (
     ImapLoginError,
     MailFolderNotFoundError,
@@ -16,7 +17,7 @@ from mailprocessor.errors import (
 )
 from mailprocessor.gui import (
     QueueLogHandler,
-    UiFieldRule,
+    describe_rule,
     friendly_error,
     open_in_default_app,
     output_file_path,
@@ -25,7 +26,9 @@ from mailprocessor.gui import (
     path_setting,
     render_config_text,
     render_rules_text,
+    rule_from_inputs,
     run_summary_text,
+    split_labels,
 )
 from mailprocessor.i18n import t
 from mailprocessor.processor import RunSummary
@@ -41,13 +44,13 @@ def test_parse_rules_text_reads_fields() -> None:
 
     fields = parse_rules_text(rules_text)
 
-    assert fields == [UiFieldRule(column="Name", pattern=r"(?im)^Name:\s*(.+)$", required=True)]
+    assert fields == [FieldRule(column="Name", pattern=r"(?im)^Name:\s*(.+)$", required=True)]
 
 
 def test_render_rules_text_roundtrip() -> None:
     original = [
-        UiFieldRule(column="Name", pattern=r"(?im)^Name:\s*(.+)$", required=True),
-        UiFieldRule(column="Telefonnummer", pattern=r"(?im)^Telefonnummer:\s*(.+)$", required=False),
+        FieldRule(column="Name", pattern=r"(?im)^Name:\s*(.+)$", required=True),
+        FieldRule(column="Telefonnummer", pattern=r"(?im)^Telefonnummer:\s*(.+)$", required=False),
     ]
 
     rendered = render_rules_text(original)
@@ -93,13 +96,13 @@ sender_filter = "schule@example.com"
 
 
 def test_render_rules_text_escapes_control_characters() -> None:
-    original = [UiFieldRule(column='Say "hi"\tnow', pattern="a\\b\nc\x7f", required=True)]
+    original = [FieldRule(column='Say "hi"\tnow', pattern="a\\b\nc\x7f", required=True)]
 
     assert parse_rules_text(render_rules_text(original)) == original
 
 
 def test_mail_text_column_name_is_reserved() -> None:
-    text = render_rules_text([UiFieldRule(column="E-Mail-Inhalt", pattern="a", required=True)])
+    text = render_rules_text([FieldRule(column="E-Mail-Inhalt", pattern="a", required=True)])
 
     with pytest.raises(ValueError, match="reserved for the mail text"):
         parse_rules_text(text)
@@ -107,7 +110,7 @@ def test_mail_text_column_name_is_reserved() -> None:
 
 def test_parse_rules_text_rejects_duplicate_columns() -> None:
     text = render_rules_text(
-        [UiFieldRule(column="Name", pattern="a", required=True), UiFieldRule(column="Name", pattern="b", required=True)]
+        [FieldRule(column="Name", pattern="a", required=True), FieldRule(column="Name", pattern="b", required=True)]
     )
 
     with pytest.raises(ValueError, match="Duplicate parsing column"):
@@ -240,3 +243,66 @@ def test_run_summary_text_mentions_a_stopped_run() -> None:
         "Angehalten – beim nächsten Ausführen geht es an dieser Stelle weiter. "
         "2 neue Zeile(n) in out.xlsx eingetragen."
     )
+
+
+SIMPLE_RULES = [
+    FieldRule(column="Mail-Adresse", type="email", label=["Von", "From"]),
+    FieldRule(column="Absender", type="email"),
+    FieldRule(column="Name", type="between", start="mein Kind", end="für folgendes Angebot"),
+    FieldRule(column="Kurs", type="label", label="Angebot:", required=False),
+    FieldRule(column="Bemerkung", type="next_line", label='Say "hi"'),
+    FieldRule(column="Experte", pattern=r"(?m)^X:\s*(.+)$"),
+]
+
+
+def test_render_rules_text_roundtrips_all_rule_types() -> None:
+    text = render_rules_text(SIMPLE_RULES)
+
+    assert parse_rules_text(text) == SIMPLE_RULES
+    assert 'label = ["Von", "From"]' in text
+    assert 'label = "Angebot:"' in text
+    # Simple rules are stored by their inputs only; regex rules keep the original format.
+    assert text.count("pattern =") == 1
+    assert text.count("type =") == len(SIMPLE_RULES) - 1
+
+
+def test_describe_rule_in_words() -> None:
+    described = [describe_rule(rule, "de") for rule in SIMPLE_RULES]
+
+    assert described == [
+        "E-Mail-Adresse in der Zeile „Von“ oder „From“",
+        "Erste E-Mail-Adresse im Text",
+        "Zwischen „mein Kind“ und „für folgendes Angebot“",
+        "Zeile nach „Angebot:“",
+        "Zeile unter „Say \"hi\"“",
+        r"(?m)^X:\s*(.+)$",
+    ]
+    assert describe_rule(SIMPLE_RULES[0], "en") == "Email address in the line “Von” or “From”"
+
+
+def test_split_labels() -> None:
+    assert split_labels(" Von ; From;; ") == ["Von", "From"]
+
+
+def test_rule_from_inputs_keeps_only_inputs_of_the_chosen_type() -> None:
+    rule = rule_from_inputs(
+        column=" Kurs ", rule_type="label", labels_text="Angebot:; Kurs", start="left over", pattern="left over"
+    )
+
+    assert rule == FieldRule(column="Kurs", type="label", label=["Angebot:", "Kurs"])
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"column": " ", "rule_type": "label", "labels_text": "A"}, "Spaltennamen"),
+        ({"column": "Kurs", "rule_type": "label", "other_columns": ["Kurs"]}, "gibt es schon"),
+        ({"column": "Kurs", "rule_type": "next_line", "labels_text": " ; "}, "Bezeichnung"),
+        ({"column": "Name", "rule_type": "between", "start": "mein Kind"}, "Anfang und Ende"),
+        ({"column": "X", "rule_type": "regex"}, "regulären Ausdruck"),
+        ({"column": "X", "rule_type": "regex", "pattern": "("}, "Invalid regex pattern for column 'X'"),
+    ],
+)
+def test_rule_from_inputs_explains_what_is_missing(kwargs: dict, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        rule_from_inputs(**kwargs)

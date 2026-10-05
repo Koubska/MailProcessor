@@ -43,7 +43,7 @@ def parse_mail(body_text: str, rules: ParsingRules, header_text: str = "") -> Pa
     missing_required: list[str] = []
 
     for field_rule in rules.fields:
-        extracted = extract_field(field_rule.pattern, normalized)
+        extracted = extract_field(field_rule.regex, normalized)
         if extracted is None:
             if field_rule.required:
                 missing_required.append(field_rule.column)

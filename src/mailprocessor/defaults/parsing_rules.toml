@@ -1,25 +1,39 @@
+# One [[fields]] entry per Excel column. Types:
+#   label      text after a label on the same line, e.g. "Telefonnummer: 1234"
+#   next_line  label alone on a line, the value on the next line
+#   between    text between a start and an end text
+#   email      an e-mail address (in the line with the label, or anywhere if no label)
+#   regex      a hand-written regular expression in "pattern" (group 1 is the value)
+# Labels ignore upper/lower case, extra spaces and a missing colon. Several labels: label = ["A", "B"].
+
 [[fields]]
 column = "Mail-Adresse"
-# "Von:" line in the text, or the mail's "From:" header; with or without <...> around the address.
-pattern = "(?im)^[ \\t]*(?:Von|From):.*?([a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,})"
+# "Von:" line in the text, or the mail's own "From:" header.
+type = "email"
+label = ["Von", "From"]
 required = true
 
 [[fields]]
 column = "Name"
-pattern = "(?im)mein\\s+Kind\\s+(.+?)\\s+f[uü]r\\s+folgendes\\s+Angebot"
+type = "between"
+start = "mein Kind"
+end = "für folgendes Angebot"
 required = true
 
 [[fields]]
 column = "Kurs"
-pattern = "(?im)^\\s*Angebot:\\s*(.+?)\\s*$"
+type = "label"
+label = "Angebot:"
 required = true
 
 [[fields]]
 column = "Zeit"
-pattern = "(?im)^\\s*Tag:\\s*(.+?)\\s*$"
+type = "label"
+label = "Tag:"
 required = true
 
 [[fields]]
 column = "Telefonnummer"
-pattern = "(?im)^\\s*Telefonnummer:\\s*(.+?)\\s*$"
+type = "label"
+label = "Telefonnummer:"
 required = true
