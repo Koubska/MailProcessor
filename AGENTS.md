@@ -249,3 +249,16 @@ Never log:
 * attachments
 * credentials
 * extracted values or other unnecessary confidential data
+
+---
+
+## Changes and pull requests
+
+`main` is protected. Every change reaches it through a pull request; nobody pushes to `main` directly.
+
+* Start each change on a new branch from the current `main` (`feature/…`, `fix/…`, `docs/…`, `chore/…`).
+* Keep a pull request to one topic. Update tests and documentation in the same pull request.
+* A pull request is merged only when CI is green (tests on Ubuntu, Windows and macOS, and lint). Merges are squash merges.
+* Small Dependabot updates are merged automatically by CI; major updates need a review.
+* Releases: raise `version` in `pyproject.toml` in a pull request; after it is merged, tag that commit on `main`.
+
