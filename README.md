@@ -40,7 +40,8 @@ Das Programm hat vier Reiter, in dieser Reihenfolge einzurichten:
    erscheinen darunter; ein Doppelklick zeigt im Reiter **Felder**, welches Feld nicht gefunden wurde.
 4. **Einstellungen:** Excel-Datei, Sprache und Weiteres – meist nicht nötig.
 
-Alle Änderungen werden automatisch gespeichert.
+Alle Änderungen werden automatisch gespeichert. Tastenkürzel: **Strg+Enter** (⌘↩ auf dem Mac) überträgt,
+**Strg+Umschalt+Enter** startet den Testlauf, **Strg+E** öffnet die Excel-Datei.
 
 Die Ergebnisse landen in `out/mail_export.xlsx`: Das Blatt **daten** enthält eine Zeile pro E-Mail; die
 letzte Spalte **E-Mail-Inhalt** enthält jeweils den vollständigen Text der E-Mail. Das Blatt **fehler** listet

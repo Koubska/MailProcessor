@@ -7,6 +7,7 @@ automatically only when everything is valid.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from mailprocessor.config import (
     EmlSourceConfig,
     FieldRule,
     ImapSourceConfig,
+    ParsingRules,
     SourceConfig,
 )
 from mailprocessor.gui import setting_path
@@ -220,3 +222,97 @@ def problem_text(problem: Problem, lang: str) -> str:
     if problem.body is None:
         return t("problems.unreadable_short", lang)
     return problem.reason
+
+
+class RuleList:
+    """The fields edited in the GUI. Every change is validated like the rules file; a removal can be undone."""
+
+    def __init__(self, rules: list[FieldRule]) -> None:
+        self.rules = list(rules)
+        self._removed: tuple[int, FieldRule] | None = None
+
+    def __len__(self) -> int:
+        return len(self.rules)
+
+    def __iter__(self) -> Iterator[FieldRule]:
+        return iter(self.rules)
+
+    def __getitem__(self, index: int) -> FieldRule:
+        return self.rules[index]
+
+    def columns(self, except_index: int | None = None) -> list[str]:
+        return [rule.column for index, rule in enumerate(self.rules) if index != except_index]
+
+    def parsing_rules(self) -> ParsingRules:
+        return ParsingRules(fields=self.rules)
+
+    def _commit(self, rules: list[FieldRule]) -> None:
+        if rules:
+            ParsingRules(fields=rules)  # raises ValueError, e.g. for duplicates or the reserved column name
+        self.rules = rules
+        self._removed = None
+
+    def add(self, rule: FieldRule) -> int:
+        self._commit([*self.rules, rule])
+        return len(self.rules) - 1
+
+    def replace(self, index: int, rule: FieldRule) -> bool:
+        """Put `rule` at `index`; returns False (and changes nothing) if it is the same rule."""
+        if self.rules[index] == rule:
+            return False
+        self._commit([*self.rules[:index], rule, *self.rules[index + 1 :]])
+        return True
+
+    def move(self, index: int, offset: int) -> int | None:
+        new_index = index + offset
+        if not 0 <= new_index < len(self.rules):
+            return None
+        rules = list(self.rules)
+        rules[index], rules[new_index] = rules[new_index], rules[index]
+        self._commit(rules)
+        return new_index
+
+    def remove(self, index: int) -> FieldRule:
+        removed = self.rules[index]
+        self.rules = [*self.rules[:index], *self.rules[index + 1 :]]
+        self._removed = (index, removed)
+        return removed
+
+    @property
+    def can_undo(self) -> bool:
+        return self._removed is not None
+
+    def undo_remove(self) -> int | None:
+        """Put the last removed field back where it was; None if nothing to undo or it would be invalid now."""
+        if self._removed is None:
+            return None
+        index, rule = self._removed
+        index = min(index, len(self.rules))
+        try:
+            self._commit([*self.rules[:index], rule, *self.rules[index:]])
+        except ValueError:
+            self._removed = None
+            return None
+        return index
+
+
+@dataclass(frozen=True)
+class Shortcut:
+    sequences: tuple[str, ...]  # tkinter event sequences
+    label: str  # shown in hints, e.g. "Strg+Enter"
+
+
+def shortcuts(platform: str, lang: str) -> dict[str, Shortcut]:
+    """Keyboard shortcuts for the main actions; Command on macOS, Control elsewhere."""
+    if platform == "darwin":
+        return {
+            "run": Shortcut(("<Command-Return>",), "⌘↩"),
+            "test_run": Shortcut(("<Command-Shift-Return>",), "⇧⌘↩"),
+            "open_excel": Shortcut(("<Command-e>", "<Command-E>"), "⌘E"),
+        }
+    control, shift = ("Strg", "Umschalt") if lang == "de" else ("Ctrl", "Shift")
+    return {
+        "run": Shortcut(("<Control-Return>",), f"{control}+Enter"),
+        "test_run": Shortcut(("<Control-Shift-Return>",), f"{control}+{shift}+Enter"),
+        "open_excel": Shortcut(("<Control-e>", "<Control-E>"), f"{control}+E"),
+    }
