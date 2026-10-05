@@ -1,12 +1,14 @@
 from importlib import resources
 from pathlib import Path
 
-from mailprocessor.config import DEFAULT_FILES, FieldRule, load_parsing_rules
+from mailprocessor.config import DEFAULT_FILES, FieldRule, ParsingRules, Profile, load_parsing_rules
 from mailprocessor.preview import (
     RulePreview,
     SampleMail,
+    best_profile,
     load_sample,
     preview_rule,
+    profile_summary_text,
     result_text,
     sample_files,
     summary_text,
@@ -17,7 +19,7 @@ EXAMPLE = Path(__file__).resolve().parents[1] / "docs" / "example.eml"
 
 def _default_rules() -> list[FieldRule]:
     with resources.as_file(DEFAULT_FILES / "parsing_rules.toml") as path:
-        return load_parsing_rules(path).fields
+        return load_parsing_rules(path).profiles[0].fields
 
 
 def test_load_sample_reads_body_and_headers() -> None:
@@ -95,3 +97,28 @@ def test_sample_files_lists_matching_files_sorted(tmp_path: Path) -> None:
 
     assert [path.name for path in sample_files(tmp_path)] == ["a.eml", "b.eml"]
     assert sample_files(tmp_path / "missing") == []
+
+
+def test_best_profile_for_the_sample_mail() -> None:
+    abmeldung = Profile(name="Abmeldung", fields=[FieldRule(column="Grund", type="label", label="Grund:")])
+    rules = ParsingRules(profiles=[Profile(name="Anmeldung", fields=_default_rules()), abmeldung])
+    sample = load_sample(EXAMPLE)
+
+    best = best_profile(rules, sample)
+
+    assert best.profile == "Anmeldung"
+    assert profile_summary_text(best, "fehler", "de") == (
+        "✓ Passt am besten zum Profil „Anmeldung“ (5 Felder gefunden) – diese Mail würde übernommen."
+    )
+
+
+def test_profile_summary_when_no_profile_fits() -> None:
+    abmeldung = Profile(name="Abmeldung", fields=[FieldRule(column="Grund", type="label", label="Grund:")])
+    rules = ParsingRules(profiles=[abmeldung, Profile(name="Leer", fields=[FieldRule(column="X", pattern="nie")])])
+
+    best = best_profile(rules, SampleMail(title="t", body="Hallo"))
+
+    assert profile_summary_text(best, "fehler", "de") == (
+        "✗ Passt zu keinem Profil. Am ähnlichsten ist „Abmeldung“, dort fehlt „Grund“ – "
+        "diese Mail käme ins Blatt „fehler“."
+    )

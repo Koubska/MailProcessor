@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import mailprocessor.gui as gui_module
-from mailprocessor.config import FieldRule
+from mailprocessor.config import FieldRule, Profile
 from mailprocessor.errors import (
     ImapLoginError,
     MailFolderNotFoundError,
@@ -34,23 +34,47 @@ from mailprocessor.i18n import t
 from mailprocessor.processor import RunSummary
 
 
+def _profile(*fields: FieldRule, name: str = "Standard") -> Profile:
+    # Not validated, so tests can also write invalid rules files.
+    return Profile.model_construct(name=name, fields=list(fields))
+
+
 def test_parse_rules_text_reads_fields() -> None:
+    rules_text = '[[fields]]\ncolumn = "Name"\npattern = "(?im)^Name:\\\\s*(.+)$"\nrequired = true\n'
+
+    profiles = parse_rules_text(rules_text)
+
+    # A file from before profiles existed is one profile.
+    assert profiles == [
+        Profile(name="Standard", fields=[FieldRule(column="Name", pattern=r"(?im)^Name:\s*(.+)$", required=True)])
+    ]
+
+
+def test_parse_rules_text_reads_profiles() -> None:
     rules_text = (
-        '[[fields]]\n'
-        'column = "Name"\n'
-        'pattern = "(?im)^Name:\\\\s*(.+)$"\n'
-        "required = true\n"
+        '[[profiles]]\nname = "Anmeldung"\n\n'
+        '[[profiles.fields]]\ncolumn = "Kurs"\ntype = "label"\nlabel = "Angebot:"\n\n'
+        '[[profiles]]\nname = "Abmeldung"\n\n'
+        '[[profiles.fields]]\ncolumn = "Grund"\ntype = "label"\nlabel = "Grund:"\n'
     )
 
-    fields = parse_rules_text(rules_text)
+    profiles = parse_rules_text(rules_text)
 
-    assert fields == [FieldRule(column="Name", pattern=r"(?im)^Name:\s*(.+)$", required=True)]
+    assert [profile.name for profile in profiles] == ["Anmeldung", "Abmeldung"]
+    assert [field.column for field in profiles[1].fields] == ["Grund"]
+    assert parse_rules_text("") == []
 
 
 def test_render_rules_text_roundtrip() -> None:
     original = [
-        FieldRule(column="Name", pattern=r"(?im)^Name:\s*(.+)$", required=True),
-        FieldRule(column="Telefonnummer", pattern=r"(?im)^Telefonnummer:\s*(.+)$", required=False),
+        Profile(
+            name="Anmeldung",
+            fields=[
+                FieldRule(column="Name", pattern=r"(?im)^Name:\s*(.+)$", required=True),
+                FieldRule(column="Telefonnummer", pattern=r"(?im)^Telefonnummer:\s*(.+)$", required=False),
+            ],
+        ),
+        Profile(name="Abmeldung", fields=[FieldRule(column="Name", type="label", label="Name:")]),
     ]
 
     rendered = render_rules_text(original)
@@ -111,22 +135,22 @@ def test_render_config_text_leaves_out_an_empty_filter() -> None:
 
 
 def test_render_rules_text_escapes_control_characters() -> None:
-    original = [FieldRule(column='Say "hi"\tnow', pattern="a\\b\nc\x7f", required=True)]
+    original = [
+        Profile(name='Say "hi" now', fields=[FieldRule(column='Say "hi"\tnow', pattern="a\\b\nc\x7f", required=True)])
+    ]
 
     assert parse_rules_text(render_rules_text(original)) == original
 
 
 def test_mail_text_column_name_is_reserved() -> None:
-    text = render_rules_text([FieldRule(column="E-Mail-Inhalt", pattern="a", required=True)])
+    text = render_rules_text([_profile(FieldRule(column="E-Mail-Inhalt", pattern="a", required=True))])
 
     with pytest.raises(ValueError, match="is reserved"):
         parse_rules_text(text)
 
 
 def test_parse_rules_text_rejects_duplicate_columns() -> None:
-    text = render_rules_text(
-        [FieldRule(column="Name", pattern="a", required=True), FieldRule(column="Name", pattern="b", required=True)]
-    )
+    text = render_rules_text([_profile(FieldRule(column="Name", pattern="a"), FieldRule(column="Name", pattern="b"))])
 
     with pytest.raises(ValueError, match="Duplicate parsing column"):
         parse_rules_text(text)
@@ -179,6 +203,15 @@ def test_run_summary_text_reports_new_rows_problems_and_skipped() -> None:
         "1 E-Mail(s) mit Problemen – Details im Blatt „fehler“. "
         "2 bereits verarbeitete E-Mail(s) übersprungen."
     )
+
+
+def test_run_summary_text_lists_new_rows_per_profile() -> None:
+    per_profile = (("Anmeldung", 2), ("Abmeldung", 1), ("Leer", 0))
+    summary = RunSummary(seen=3, processed=3, skipped=0, failed=0, per_profile=per_profile)
+
+    text = run_summary_text(summary, "out.xlsx", "fehler", dry_run=False, lang="de")
+
+    assert text == "3 neue Zeile(n) in out.xlsx eingetragen (Anmeldung: 2, Abmeldung: 1)."
 
 
 def test_run_summary_text_nothing_new() -> None:
@@ -290,9 +323,9 @@ SIMPLE_RULES = [
 
 
 def test_render_rules_text_roundtrips_all_rule_types() -> None:
-    text = render_rules_text(SIMPLE_RULES)
+    text = render_rules_text([Profile(name="Standard", fields=SIMPLE_RULES)])
 
-    assert parse_rules_text(text) == SIMPLE_RULES
+    assert parse_rules_text(text)[0].fields == SIMPLE_RULES
     assert 'label = ["Von", "From"]' in text
     assert 'label = "Angebot:"' in text
     # Simple rules are stored by their inputs only; regex rules keep the original format.
@@ -308,7 +341,7 @@ def test_describe_rule_in_words() -> None:
         "Erste E-Mail-Adresse im Text",
         "Zwischen „mein Kind“ und „für folgendes Angebot“",
         "Zeile nach „Angebot:“",
-        "Zeile unter „Say \"hi\"“",
+        'Zeile unter „Say "hi"“',
         r"(?m)^X:\s*(.+)$",
     ]
     assert describe_rule(SIMPLE_RULES[0], "en") == "Email address in the line “Von” or “From”"

@@ -3,11 +3,14 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook
 
-from mailprocessor.config import FieldRule, MailFilter
+from mailprocessor.config import FieldRule, MailFilter, Profile
 from mailprocessor.gui import _default_config
+from mailprocessor.parser import ParseResult
 from mailprocessor.preview import RulePreview
 from mailprocessor.processor import Problem
 from mailprocessor.ui_model import (
+    CardStatus,
+    ProfileList,
     RuleList,
     config_from_form,
     excel_status,
@@ -15,6 +18,7 @@ from mailprocessor.ui_model import (
     form_values,
     mails_status,
     problem_text,
+    profiles_status,
     shortcuts,
 )
 
@@ -26,6 +30,15 @@ def test_form_values_roundtrip_to_the_same_config() -> None:
 
     assert errors == {}
     assert rebuilt == config
+
+
+def test_form_keeps_the_profile_sheets_choice() -> None:
+    config = _default_config()
+    config.app.profile_sheets = "per_profile"
+
+    rebuilt, _errors = config_from_form(form_values(config), "de")
+
+    assert rebuilt is not None and rebuilt.app.profile_sheets == "per_profile"
 
 
 @pytest.mark.parametrize(
@@ -117,7 +130,7 @@ def test_fields_status() -> None:
 
 def test_excel_status_counts_rows(tmp_path: Path) -> None:
     path = tmp_path / "out.xlsx"
-    assert "wird beim ersten Übertragen angelegt" in excel_status(path, "daten", "fehler", "de").text
+    assert "wird beim ersten Übertragen angelegt" in excel_status(path, ["daten"], "fehler", "de").text
 
     workbook = Workbook()
     workbook.active.title = "daten"
@@ -128,9 +141,9 @@ def test_excel_status_counts_rows(tmp_path: Path) -> None:
     workbook["fehler"].append(["x"])
     workbook.save(path)
 
-    assert excel_status(path, "daten", "fehler", "de").text == "out.xlsx – 2 Zeile(n), 1 E-Mail(s) mit Problemen"
+    assert excel_status(path, ["daten"], "fehler", "de").text == "out.xlsx – 2 Zeile(n), 1 E-Mail(s) mit Problemen"
     (tmp_path / "broken.xlsx").write_text("not excel", encoding="utf-8")
-    assert excel_status(tmp_path / "broken.xlsx", "daten", "fehler", "de").ok is None
+    assert excel_status(tmp_path / "broken.xlsx", ["daten"], "fehler", "de").ok is None
 
 
 def test_problem_text() -> None:
@@ -212,7 +225,7 @@ def test_rule_list_columns_and_parsing_rules() -> None:
     rules = RuleList([_rule("A"), _rule("B")])
 
     assert rules.columns(except_index=0) == ["B"]
-    assert rules.parsing_rules().fields == rules.rules
+    assert rules.parsing_rules().profiles[0].fields == rules.rules
     assert not RuleList([])
 
 
@@ -232,3 +245,102 @@ def test_shortcuts_follow_the_platform(platform: str, lang: str, labels: tuple[s
     assert result["test_run"].sequences[0].endswith("Shift-Return>")
     # Caps Lock must not break the letter shortcut.
     assert {sequence[-2] for sequence in result["open_excel"].sequences} == {"e", "E"}
+
+
+def test_excel_status_adds_up_the_profile_sheets(tmp_path: Path) -> None:
+    path = tmp_path / "out.xlsx"
+    workbook = Workbook()
+    workbook.active.title = "Anmeldung"
+    workbook.active.append(["Name"])
+    workbook.active.append(["A"])
+    abmeldung = workbook.create_sheet("Abmeldung")
+    abmeldung.append(["Name"])
+    abmeldung.append(["B"])
+    abmeldung.append(["C"])
+    workbook.save(path)
+
+    assert excel_status(path, ["Anmeldung", "Abmeldung"], "fehler", "de").text == "out.xlsx – 3 Zeile(n)"
+
+
+def test_problem_text_names_the_closest_profile() -> None:
+    problem = Problem(name="a.eml", reason="", missing=("Kurs",), body="x", profile="Abmeldung")
+
+    assert problem_text(problem, "de") == "nicht gefunden: „Kurs“ (am ähnlichsten: Profil „Abmeldung“)"
+
+
+def test_profiles_status() -> None:
+    fits = ParseResult({"Kurs": "Judo"}, [], None, "Anmeldung")
+    misses = ParseResult({}, ["Kurs"], "missing", "Anmeldung")
+
+    assert profiles_status(2, 7, None, "de") == CardStatus(None, "2 Profile, 7 Feld(er)")
+    assert profiles_status(2, 7, fits, "de") == CardStatus(
+        True, "2 Profile, 7 Feld(er) – die Beispiel-Mail passt zu „Anmeldung“"
+    )
+    assert profiles_status(2, 7, misses, "de").ok is False
+
+
+def _profile(name: str, *columns: str) -> Profile:
+    return Profile(name=name, fields=[_rule(column) for column in columns])
+
+
+def test_profile_list_starts_with_one_empty_default_profile() -> None:
+    profiles = ProfileList([])
+
+    assert profiles.names == ["Standard"]
+    assert not profiles.current
+    assert profiles.profiles() == []
+    with pytest.raises(ValueError):
+        profiles.parsing_rules()
+
+
+def test_profile_list_switches_adds_renames_and_removes() -> None:
+    profiles = ProfileList([_profile("Anmeldung", "Name", "Kurs"), _profile("Abmeldung", "Name")])
+    assert (profiles.current_name, profiles.current.columns(), profiles.field_count) == (
+        "Anmeldung",
+        ["Name", "Kurs"],
+        3,
+    )
+
+    profiles.select(1)
+    assert profiles.current.columns() == ["Name"]
+
+    assert profiles.add(" Warteliste ", "de") == 2
+    assert profiles.current_name == "Warteliste"
+    # Saved and run without the new profile until it has fields.
+    assert [profile.name for profile in profiles.profiles()] == ["Anmeldung", "Abmeldung"]
+    profiles.current.add(_rule("Kurs"))
+    assert [profile.name for profile in profiles.parsing_rules().profiles] == ["Anmeldung", "Abmeldung", "Warteliste"]
+
+    profiles.rename("Nachrücker", "de")
+    assert profiles.names == ["Anmeldung", "Abmeldung", "Nachrücker"]
+
+    assert profiles.remove() == "Nachrücker"
+    assert (profiles.names, profiles.index) == (["Anmeldung", "Abmeldung"], 1)
+    profiles.remove()
+    with pytest.raises(ValueError):
+        profiles.remove()  # the last profile stays
+
+
+@pytest.mark.parametrize(
+    ("name", "message"),
+    [
+        ("  ", "Bitte einen Namen"),
+        ("x" * 32, "höchstens 31 Zeichen"),
+        ("Kurs/Tag", "Zeichen"),
+        ("anmeldung", "gibt es schon"),
+    ],
+)
+def test_profile_names_are_checked_with_readable_messages(name: str, message: str) -> None:
+    profiles = ProfileList([_profile("Anmeldung", "Name")])
+
+    with pytest.raises(ValueError, match=message):
+        profiles.add(name, "de")
+    assert profiles.names == ["Anmeldung"]
+
+
+def test_renaming_a_profile_may_change_only_its_case() -> None:
+    profiles = ProfileList([_profile("anmeldung", "Name")])
+
+    profiles.rename("Anmeldung", "de")
+
+    assert profiles.names == ["Anmeldung"]

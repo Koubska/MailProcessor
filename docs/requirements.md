@@ -125,7 +125,7 @@ Do not identify messages by sender + subject or sender + timestamp + subject alo
 
 # 8. Parsing
 
-Extraction rules are configured in `parsing_rules.toml` as a list of fields, one per Excel column. Users describe what to look for; the app generates the regular expression (`rule_patterns.py`):
+Extraction rules are configured in `parsing_rules.toml` as one or more **profiles**, each a list of fields, one per Excel column. A profile describes one kind of mail (e.g. a registration and a cancellation form). Users describe what to look for; the app generates the regular expression (`rule_patterns.py`):
 
 | `type` | GUI name | Inputs | Value |
 |---|---|---|---|
@@ -136,24 +136,42 @@ Extraction rules are configured in `parsing_rules.toml` as a list of fields, one
 | `regex` | Experte (Regex) | `pattern` | group 1 of a Python regular expression (whole match without groups) |
 
 ```toml
-[[fields]]
+[[profiles]]
+name = "Anmeldung"
+
+[[profiles.fields]]
 column = "Mail-Adresse"
 type = "email"
 label = ["Von", "From"]   # alternatives; a single label can be a plain string
 required = true
 
-[[fields]]
+[[profiles.fields]]
 column = "Kurs"
 type = "label"
 label = "Angebot:"
 required = true
+
+[[profiles]]
+name = "Abmeldung"
+
+[[profiles.fields]]
+column = "Grund"
+type = "label"
+label = "Grund:"
+required = true
 ```
+
+**Choosing the profile.** Every mail is parsed with every profile. Only a profile that finds all its required fields can succeed; of those, the one that finds the most fields (required and optional) wins, and a tie goes to the profile listed first. If no profile succeeds, the mail fails and is reported against the closest profile (fewest required fields missing, then most fields found). With a single profile, behaviour is unchanged.
+
+* A file with only top-level `[[fields]]` (written before profiles existed) is one profile named `Standard`. Using both `[[fields]]` and `[[profiles]]` is an error. The GUI always writes `[[profiles]]`.
+* Profile names are unique (ignoring case) and must be valid Excel sheet names (at most 31 characters, none of `[ ] : * ? / \`, no leading or trailing `'`), because they can become sheet names. Column names are unique within a profile; the same column may appear in several profiles.
+* Every profile needs at least one field. The GUI keeps a new, still empty profile while editing but saves and runs only profiles with fields.
 
 * Labels are matched tolerantly: case-insensitive, any spacing, optional colon, at the start of a line, and not as a word prefix ("Tag" does not match "Tagesordnung:"). `label` and `email` never take a value from the next line. Inputs are matched literally (escaped).
 * A rule without `type` is a `regex` rule, so files from before the simple types keep working. The GUI writes only the inputs of each rule's type. "Als Regex bearbeiten" converts a simple rule into a `regex` rule; this is one-way.
 * Rules are matched against the email text followed by the email's header lines (`Name: value`). Text comes first, so a label in the text wins over a header; headers are the fallback (e.g. the sender in `From:`). Whitespace in the value is collapsed.
 * The default rules extract all fields from `docs/example.eml`; `tests/test_default_rules.py` guards this.
-* Missing inputs for a type, invalid patterns and duplicate column names are rejected when the rules are loaded; the GUI explains them in plain language.
+* Missing inputs for a type, invalid patterns, duplicate column names and invalid or duplicate profile names are rejected when the rules are loaded; the GUI explains them in plain language.
 * A missing required field is a parsing error for that message. Missing values are never treated as valid.
 * Parsing is deterministic and independent of the mail source and of Excel.
 
@@ -195,7 +213,8 @@ SQLite stores the processing history (`sqlite_path`).
 A single workbook (`output_xlsx`) is appended to across runs. It is in German, like its sheet names.
 
 * **Columns by name:** the app finds every column by its header, never by position. Missing columns are added at the end; nothing is moved or removed. Users can add their own columns (e.g. "Bestätigt") and notes; fields can be added, removed or reordered (a new field gets a new column at the end, a removed field's column stays and new rows leave it empty; the rule order only decides the column order of a new workbook). Only a sheet that has data but no header row stops the run with a clear message.
-* **Data worksheet** (default `daten`): one column per configured field, then `Eingegangen am` (the mail's `Date` header in local time, empty if missing or unreadable), `Übertragen am` (time of the run), both as real Excel dates (`TT.MM.JJJJ hh:mm`), and `E-Mail-Inhalt` with the mail's full text (as extracted for parsing; truncated to Excel's limit of 32,767 characters per cell). These three names are reserved and cannot be used for a rule. Older workbooks get the missing columns added; their old rows stay empty there.
+* **Data worksheet** (default `daten`): one column per configured field, then `Eingegangen am` (the mail's `Date` header in local time, empty if missing or unreadable), `Übertragen am` (time of the run), both as real Excel dates (`TT.MM.JJJJ hh:mm`), and `E-Mail-Inhalt` with the mail's full text (as extracted for parsing; truncated to Excel's limit of 32,767 characters per cell). These three names are reserved and cannot be used for a rule.
+* **Several profiles** (`profile_sheets` in `[app]`): `"shared"` (default) writes all rows to the data worksheet; it then starts with a `Profil` column naming the profile each row was read with, followed by the columns of all profiles (each once). Cells of columns a profile does not have stay empty. `"per_profile"` writes each profile's rows to its own sheet, named like the profile, with only that profile's columns; `sheet_data` is then unused, and a profile named like the error sheet stops the run. Renaming a profile in this mode starts a new sheet. With a single profile and `"shared"`, there is no `Profil` column. `Profil` is reserved like the three names above. Older workbooks get the missing columns added; their old rows stay empty there.
 * **Error worksheet** (default `fehler`): `E-Mail` (file name or IMAP uid), `Absender`, `Betreff`, `Eingegangen am`, `Fehlende Felder`, `Grund` (plain German, technical details in parentheses), `Geprüft am`, and the hidden `Kennung` that identifies the mail across runs. Exactly one row per currently failing message; the row is removed once the message succeeds. Error sheets of earlier versions (English, technical) are converted automatically.
 * Control characters that Excel cannot store are removed from all cell values.
 * Bold, frozen header row and autofilter.
@@ -207,7 +226,7 @@ A single workbook (`output_xlsx`) is appended to across runs. It is in German, l
 
 # 12. Configuration
 
-`config.toml` holds the app settings (`sqlite_path`, `output_xlsx`, sheet names, `log_level`, `dry_run`, `max_messages`, `max_age_days`) and the source settings (`[source]`, `[source.eml]`, `[source.imap]`).
+`config.toml` holds the app settings (`sqlite_path`, `output_xlsx`, sheet names, `profile_sheets`, `log_level`, `dry_run`, `max_messages`, `max_age_days`) and the source settings (`[source]`, `[source.eml]`, `[source.imap]`).
 
 Relative paths are resolved against the directory containing `config.toml`, so the shipped bundle works regardless of the working directory.
 

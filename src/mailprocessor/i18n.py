@@ -107,6 +107,50 @@ CATALOG: dict[str, dict[str, str]] = {
         "card.mails.filter_sender": "nur von {entries}",
         "card.mails.filter_or": "oder",
         "card.fields.none": "Noch keine Felder angelegt.",
+        "card.profiles.count": "{profiles} Profile, {fields} Feld(er)",
+        "card.profiles.fits": "{count} – die Beispiel-Mail passt zu {profile}",
+        "card.profiles.none_fits": "{count} – die Beispiel-Mail passt zu keinem Profil",
+        "preview.summary.profile": (
+            "✓ Passt am besten zum Profil {profile} ({count} Felder gefunden) – diese Mail würde übernommen."
+        ),
+        "preview.summary.no_profile": (
+            "✗ Passt zu keinem Profil. Am ähnlichsten ist {profile}, dort fehlt {columns} – "
+            "diese Mail käme ins Blatt „{sheet}“."
+        ),
+        "problems.missing_profile": "nicht gefunden: {columns} (am ähnlichsten: Profil {profile})",
+        "label.profile": "Profil",
+        "button.profile_new": "Neu …",
+        "button.profile_rename": "Umbenennen …",
+        "button.profile_remove": "Löschen",
+        "tip.profile": (
+            "Jede Art von E-Mail (z. B. Anmeldung, Abmeldung) bekommt ein eigenes Profil mit eigenen Feldern. "
+            "Jede E-Mail wird mit allen Profilen geprüft. Übernommen wird sie mit dem Profil, das alle "
+            "Pflichtfelder und insgesamt die meisten Felder findet; bei Gleichstand gilt das erste."
+        ),
+        "tip.profile_new": "Legt ein leeres Profil an; danach die Felder hinzufügen.",
+        "tip.profile_rename": (
+            "Ändert den Namen des Profils. Bei „Ein Blatt pro Profil“ kommen neue Zeilen danach in ein Blatt "
+            "mit dem neuen Namen."
+        ),
+        "tip.profile_remove": "Löscht das angezeigte Profil mit allen seinen Feldern.",
+        "dialog.profile_new": "Neues Profil",
+        "dialog.profile_rename": "Profil umbenennen",
+        "dialog.profile_name": "Name des Profils (z. B. Anmeldung):",
+        "confirm.profile_remove": (
+            "Profil {name} mit {count} Feld(ern) löschen? Das lässt sich nicht rückgängig machen."
+        ),
+        "status.profile_added": "Profil {name} angelegt – jetzt die Felder hinzufügen.",
+        "status.profile_renamed": "Profil heißt jetzt {name}.",
+        "status.profile_removed": "Profil {name} gelöscht.",
+        "error.profile.name_empty": "Bitte einen Namen für das Profil eingeben.",
+        "error.profile.name_long": "Ein Profilname darf höchstens {max} Zeichen lang sein (Grenze für Excel-Blätter).",
+        "error.profile.name_chars": (
+            "Ein Profilname darf die Zeichen [ ] : * ? / \\ nicht enthalten und nicht mit ' beginnen oder enden."
+        ),
+        "error.profile.name_taken": "Ein Profil {name} gibt es schon.",
+        "settings.profile_sheets": "Mehrere Profile",
+        "settings.profile_sheets_shared": "Alle in ein Blatt (mit Spalte „Profil“)",
+        "settings.profile_sheets_per_profile": "Ein Blatt pro Profil (heißt wie das Profil)",
         "card.fields.count": "{count} Feld(er)",
         "card.fields.ok": "{count} – in der Beispiel-Mail alles gefunden",
         "card.fields.missing": "{count} – in der Beispiel-Mail fehlt {columns}",
@@ -418,6 +462,47 @@ CATALOG: dict[str, dict[str, str]] = {
         "card.mails.filter_sender": "only from {entries}",
         "card.mails.filter_or": "or",
         "card.fields.none": "No fields yet.",
+        "card.profiles.count": "{profiles} profiles, {fields} field(s)",
+        "card.profiles.fits": "{count} – the sample mail fits {profile}",
+        "card.profiles.none_fits": "{count} – the sample mail fits no profile",
+        "preview.summary.profile": (
+            "✓ Fits the profile {profile} best ({count} fields found) – this mail would be added."
+        ),
+        "preview.summary.no_profile": (
+            "✗ Fits no profile. Closest is {profile}, which is missing {columns} – "
+            "this mail would go to the “{sheet}” sheet."
+        ),
+        "problems.missing_profile": "not found: {columns} (closest: profile {profile})",
+        "label.profile": "Profile",
+        "button.profile_new": "New …",
+        "button.profile_rename": "Rename …",
+        "button.profile_remove": "Delete",
+        "tip.profile": (
+            "Each kind of email (e.g. registration, cancellation) gets its own profile with its own fields. "
+            "Every email is checked against all profiles. It is added with the profile that finds all required "
+            "fields and the most fields overall; on a tie, the first one wins."
+        ),
+        "tip.profile_new": "Creates an empty profile; then add its fields.",
+        "tip.profile_rename": (
+            "Changes the profile's name. With “One sheet per profile”, new rows then go to a sheet with the new name."
+        ),
+        "tip.profile_remove": "Deletes the shown profile with all its fields.",
+        "dialog.profile_new": "New profile",
+        "dialog.profile_rename": "Rename profile",
+        "dialog.profile_name": "Name of the profile (e.g. Registration):",
+        "confirm.profile_remove": "Delete the profile {name} with {count} field(s)? This cannot be undone.",
+        "status.profile_added": "Profile {name} created – now add its fields.",
+        "status.profile_renamed": "The profile is now called {name}.",
+        "status.profile_removed": "Profile {name} deleted.",
+        "error.profile.name_empty": "Please enter a name for the profile.",
+        "error.profile.name_long": "A profile name can have at most {max} characters (limit for Excel sheets).",
+        "error.profile.name_chars": (
+            "A profile name must not contain [ ] : * ? / \\ and must not start or end with '."
+        ),
+        "error.profile.name_taken": "There is already a profile {name}.",
+        "settings.profile_sheets": "Several profiles",
+        "settings.profile_sheets_shared": "All in one sheet (with a “Profil” column)",
+        "settings.profile_sheets_per_profile": "One sheet per profile (named like the profile)",
         "card.fields.count": "{count} field(s)",
         "card.fields.ok": "{count} – everything found in the sample mail",
         "card.fields.missing": "{count} – missing in the sample mail: {columns}",

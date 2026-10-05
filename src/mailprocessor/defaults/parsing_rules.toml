@@ -1,4 +1,8 @@
-# One [[fields]] entry per Excel column. Types:
+# One [[profiles]] entry per kind of mail (e.g. a registration form), each with its own fields.
+# Every mail is checked against all profiles; the one that finds all its required fields and the most
+# fields overall is used (on a tie, the one listed first). A file with only [[fields]] is one profile.
+#
+# One [[profiles.fields]] entry per Excel column. Types:
 #   label      text after a label on the same line, e.g. "Telefonnummer: 1234"
 #   next_line  label alone on a line, the value on the next line
 #   between    text between a start and an end text
@@ -6,33 +10,36 @@
 #   regex      a hand-written regular expression in "pattern" (group 1 is the value)
 # Labels ignore upper/lower case, extra spaces and a missing colon. Several labels: label = ["A", "B"].
 
-[[fields]]
+[[profiles]]
+name = "Anmeldung"
+
+[[profiles.fields]]
 column = "Mail-Adresse"
 # "Von:" line in the text, or the mail's own "From:" header.
 type = "email"
 label = ["Von", "From"]
 required = true
 
-[[fields]]
+[[profiles.fields]]
 column = "Name"
 type = "between"
 start = "mein Kind"
 end = "für folgendes Angebot"
 required = true
 
-[[fields]]
+[[profiles.fields]]
 column = "Kurs"
 type = "label"
 label = "Angebot:"
 required = true
 
-[[fields]]
+[[profiles.fields]]
 column = "Zeit"
 type = "label"
 label = "Tag:"
 required = true
 
-[[fields]]
+[[profiles.fields]]
 column = "Telefonnummer"
 type = "label"
 label = "Telefonnummer:"

@@ -121,6 +121,8 @@ def cli(
             # Only with a filter, so the line stays the same for everyone else.
             + (f" filtered={summary.filtered}" if summary.filtered else "")
         )
+        if summary.per_profile:
+            typer.echo("per profile: " + ", ".join(f"{name}={count}" for name, count in summary.per_profile))
         if app_config.app.dry_run:
             typer.echo("Dry run: nothing was written.")
     except (ValueError, OSError) as exc:

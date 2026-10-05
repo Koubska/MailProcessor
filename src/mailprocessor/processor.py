@@ -11,11 +11,12 @@ from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
-from mailprocessor.config import AppConfig, ParsingRules
+from mailprocessor.config import AppConfig, AppSection, ParsingRules
 from mailprocessor.errors import MailFolderNotFoundError, WorkbookLockedError
 from mailprocessor.excel_writer import (
     INTERNAL_ERROR_REASON,
     MISSING_FIELDS_REASON,
+    PROFILE_COLUMN,
     UNREADABLE_REASON,
     ErrorEntry,
     ExcelOutput,
@@ -47,6 +48,8 @@ class Problem:
     # The mail text and headers as parsed, so the GUI can show the mail; None if it could not be read.
     body: str | None = None
     header_text: str = ""
+    # The profile that came closest, if there are several; its fields are the missing ones.
+    profile: str = ""
 
 
 @dataclass(frozen=True)
@@ -60,6 +63,8 @@ class RunSummary:
     # Mails left out because subject or sender did not match the filter; not counted in `seen`.
     filtered: int = 0
     problems: tuple[Problem, ...] = ()
+    # New rows per profile, in the order of the profiles; empty if there is only one profile.
+    per_profile: tuple[tuple[str, int], ...] = ()
 
 
 def _mail_datetime(date_raw: str) -> datetime | None:
@@ -140,12 +145,16 @@ def _safe_parse(message: NormalizedMail, rules: ParsingRules) -> ParseResult:
         return ParseResult(values={}, missing_required=[], error_reason=reason)
 
 
-def _error_entry(item: NormalizedMail | MailReadError, result: ParseResult, received: datetime | None) -> ErrorEntry:
+def _error_entry(
+    item: NormalizedMail | MailReadError, result: ParseResult, received: datetime | None, several_profiles: bool
+) -> ErrorEntry:
     """The error sheet row: where to find the mail, who sent it, and why it failed, in plain German."""
     key = error_key(item.source_type, item.source_location, item.message_identity)
     if isinstance(item, MailReadError):
         return ErrorEntry(key=key, name=item.display_name, reason=f"{UNREADABLE_REASON} ({item.reason})")
-    if result.missing_required:
+    if result.missing_required and several_profiles:
+        reason = f"{MISSING_FIELDS_REASON} (am ähnlichsten: Profil „{result.profile}“)"
+    elif result.missing_required:
         reason = MISSING_FIELDS_REASON
     else:
         reason = f"{INTERNAL_ERROR_REASON} ({result.error_reason})"
@@ -158,6 +167,22 @@ def _error_entry(item: NormalizedMail | MailReadError, result: ParseResult, rece
         received=received,
         missing=tuple(result.missing_required),
     )
+
+
+def data_sheets(app: AppSection, rules: ParsingRules) -> dict[str, list[str]]:
+    """The data sheets of a run and their field columns.
+
+    One sheet per profile (named like it) with `profile_sheets = "per_profile"`; otherwise all profiles share
+    `sheet_data`, which then starts with a "Profil" column if there are several profiles.
+    """
+    if app.profile_sheets == "per_profile":
+        sheets = {profile.name: [field.column for field in profile.fields] for profile in rules.profiles}
+        clash = [name for name in sheets if name.casefold() == app.sheet_errors.casefold()]
+        if clash:
+            raise ValueError(f"Profile '{clash[0]}' has the same name as the sheet for problems; rename one of them")
+        return sheets
+    profile_column = [PROFILE_COLUMN] if len(rules.profiles) > 1 else []
+    return {app.sheet_data: [*profile_column, *rules.columns]}
 
 
 def _describe_source(app_cfg: AppConfig) -> str:
@@ -197,12 +222,10 @@ def run_pipeline(
     logger.info("Run started: reading from %s%s", _describe_source(app_cfg), dry_note)
     _check_eml_folder(app_cfg)
 
-    excel = ExcelOutput(
-        Path(app_cfg.app.output_xlsx),
-        app_cfg.app.sheet_data,
-        app_cfg.app.sheet_errors,
-        [field.column for field in rules.fields],
-    )
+    excel = ExcelOutput(Path(app_cfg.app.output_xlsx), data_sheets(app_cfg.app, rules), app_cfg.app.sheet_errors)
+    several_profiles = len(rules.profiles) > 1
+    per_profile_sheets = app_cfg.app.profile_sheets == "per_profile"
+    rows_per_profile = dict.fromkeys((profile.name for profile in rules.profiles), 0)
     if not dry_run:
         excel.check_writable()
 
@@ -259,16 +282,28 @@ def run_pipeline(
             if is_mail:
                 # Column names only; extracted values are confidential and never logged.
                 logger.debug(
-                    "%s: found %s; missing %s",
+                    "%s: found %s; missing %s%s",
                     item.display_name,
                     ", ".join(result.values) or "nothing",
                     ", ".join(result.missing_required) or "nothing",
+                    f" (best profile: {result.profile})" if several_profiles else "",
                 )
             if result.error_reason is None:
                 processed += 1
-                logger.info("Processed %s", item.display_name)
+                rows_per_profile[result.profile] += 1
+                if several_profiles:
+                    logger.info("Processed %s with profile %s", item.display_name, result.profile)
+                else:
+                    logger.info("Processed %s", item.display_name)
                 if not dry_run:
-                    excel.append_data(result.values, item.body_text, received=received)
+                    values = result.values
+                    if per_profile_sheets:
+                        sheet = result.profile
+                    else:
+                        sheet = app_cfg.app.sheet_data
+                        if several_profiles:
+                            values = {PROFILE_COLUMN: result.profile, **values}
+                    excel.append_data(values, item.body_text, received=received, sheet=sheet)
                     excel.remove_errors_for(sheet_key)
                     ledger.mark_processed(key)
                 continue
@@ -283,11 +318,12 @@ def run_pipeline(
                         missing=tuple(result.missing_required),
                         body=item.body_text if is_mail else None,
                         header_text=item.header_text if is_mail else "",
+                        profile=result.profile if several_profiles and result.missing_required else "",
                     )
                 )
             if not dry_run:
                 ledger.mark_failed(key, result.error_reason)
-                excel.upsert_error(_error_entry(item, result, received))
+                excel.upsert_error(_error_entry(item, result, received, several_profiles))
 
         if not dry_run:
             # Save the workbook first; the ledger only records messages whose rows are on disk.
@@ -316,6 +352,7 @@ def run_pipeline(
         cancelled=cancelled,
         filtered=filtered,
         problems=tuple(problems),
+        per_profile=tuple(rows_per_profile.items()) if several_profiles else (),
     )
 
 

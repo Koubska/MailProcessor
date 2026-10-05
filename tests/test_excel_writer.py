@@ -29,7 +29,7 @@ RECEIVED_AT = datetime(2026, 10, 5, 14, 0)
 
 
 def _output(path: Path, columns: list[str]) -> ExcelOutput:
-    return ExcelOutput(path, "daten", "fehler", columns, now=RUN_AT)
+    return ExcelOutput(path, {"daten": columns}, "fehler", now=RUN_AT)
 
 
 def _rows(path: Path, sheet: str = "daten") -> list[tuple]:
@@ -49,6 +49,20 @@ def _error(key: str, reason: str = "Pflichtfelder nicht gefunden", missing: tupl
 
 
 # --- data sheet
+
+
+def test_several_data_sheets_get_their_own_columns_and_rows(tmp_path: Path) -> None:
+    path = tmp_path / "output.xlsx"
+    output = ExcelOutput(path, {"Anmeldung": ["Name", "Kurs"], "Abmeldung": ["Name", "Grund"]}, "fehler", now=RUN_AT)
+
+    output.append_data({"Name": "Eva", "Grund": "Umzug"}, "text", sheet="Abmeldung")
+    output.append_data({"Name": "Max", "Kurs": "Judo"}, "text")  # first sheet by default
+    output.save()
+
+    assert load_workbook(path).sheetnames == ["Anmeldung", "Abmeldung", "fehler"]
+    assert _rows(path, "Anmeldung")[0] == ("Name", "Kurs", *FIXED_COLUMNS)
+    assert _rows(path, "Anmeldung")[1][:2] == ("Max", "Judo")
+    assert _rows(path, "Abmeldung")[1][:2] == ("Eva", "Umzug")
 
 
 def test_new_workbook_has_rule_columns_then_dates_then_mail_text(tmp_path: Path) -> None:

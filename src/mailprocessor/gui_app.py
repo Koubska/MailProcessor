@@ -15,7 +15,7 @@ import tkinter as tk
 from collections.abc import Callable
 from importlib import resources
 from pathlib import Path
-from tkinter import filedialog, font, messagebox, ttk
+from tkinter import filedialog, font, messagebox, simpledialog, ttk
 
 from mailprocessor.config import FieldRule, ParsingRules, load_app_config
 from mailprocessor.gui import (
@@ -39,12 +39,14 @@ from mailprocessor.gui import (
 )
 from mailprocessor.i18n import resolve_language, t
 from mailprocessor.logfile import attach_log_file, log_file_path
-from mailprocessor.parser import normalize_body
+from mailprocessor.parser import ParseResult, normalize_body
 from mailprocessor.preview import (
     RulePreview,
     SampleMail,
+    best_profile,
     load_sample,
     preview_rule,
+    profile_summary_text,
     result_text,
     sample_files,
     summary_text,
@@ -55,6 +57,7 @@ from mailprocessor.sources.imap_source import check_imap_connection
 from mailprocessor.ui_model import (
     DEFAULT_IMAP_PORTS,
     CardStatus,
+    ProfileList,
     RuleList,
     config_from_form,
     excel_status,
@@ -63,6 +66,7 @@ from mailprocessor.ui_model import (
     mail_count_in_folder,
     mails_status,
     problem_text,
+    profiles_status,
     shortcuts,
 )
 from mailprocessor.window_state import STATE_FILE_NAME, WindowState, fit_geometry, load_window_state, save_window_state
@@ -134,7 +138,7 @@ class App:
         self.form: dict[str, tk.Variable] = {}
         self.error_labels: dict[str, ttk.Label] = {}
         self.translated: list[tuple[tk.Widget, str, str]] = []
-        self.fields = RuleList([])
+        self.profiles = ProfileList([])
         self.shortcuts = shortcuts(sys.platform, self.lang)
         self.window_state_path = self.config_dir / "data" / STATE_FILE_NAME
         self.saved_config_text = ""
@@ -156,6 +160,7 @@ class App:
 
         self.sample: dict = {"files": [], "index": -1, "title": "", "header_text": ""}
         self.previews: list[RulePreview] | None = None
+        self.best: ParseResult | None = None  # the profile a run would choose for the sample (several profiles)
         self.problems: tuple[Problem, ...] = ()
         self.editor_mode = "edit"  # "edit": changes apply to the selected field; "new": "Hinzufügen" adds it
         self.field_type: RuleType = "label"
@@ -172,6 +177,11 @@ class App:
 
     def tr(self, key: str) -> str:
         return t(key, self.lang)
+
+    @property
+    def fields(self) -> RuleList:
+        """The fields of the profile shown in the Felder tab."""
+        return self.profiles.current
 
     def px(self, pixels: int) -> int:
         """A size in pixels, scaled like the fonts (Tk scales fonts by itself, plain pixel sizes not)."""
@@ -498,6 +508,26 @@ class App:
         paned.add(rules_pane, weight=3)
         paned.add(sample_pane, weight=2)
 
+        profile_row = ttk.Frame(rules_pane)
+        profile_row.pack(fill=tk.X, pady=(0, 8))
+        profile_label = self.label(profile_row, "label.profile", style="Heading.TLabel")
+        profile_label.pack(side=tk.LEFT)
+        self.tip(profile_label, "tip.profile")
+        self.profile_box = ttk.Combobox(profile_row, state="readonly", width=18)
+        self.profile_box.pack(side=tk.LEFT, padx=(8, 0))
+        self.tip(self.profile_box, "tip.profile")
+        self.profile_box.bind("<<ComboboxSelected>>", lambda _event: self.on_profile_selected())
+        self.button(profile_row, "button.profile_new", self.new_profile, tip="tip.profile_new").pack(
+            side=tk.LEFT, padx=(8, 0)
+        )
+        self.button(profile_row, "button.profile_rename", self.rename_profile, tip="tip.profile_rename").pack(
+            side=tk.LEFT, padx=(8, 0)
+        )
+        self.remove_profile_button = self.button(
+            profile_row, "button.profile_remove", self.remove_profile, tip="tip.profile_remove"
+        )
+        self.remove_profile_button.pack(side=tk.LEFT, padx=(8, 0))
+
         columns = ("column", "type", "description", "required", "result")
         self.fields_view = ttk.Treeview(rules_pane, columns=columns, show="headings", height=7, selectmode="browse")
         for name, width, anchor in (
@@ -627,6 +657,16 @@ class App:
         self.hint(excel, "settings.excel_hint", wrap=440).grid(row=2, column=0, columnspan=2, sticky="w", pady=(2, 8))
         self._setting_row(excel, 3, "sheet_data", "settings.sheet_data", "daten")
         self._setting_row(excel, 5, "sheet_errors", "settings.sheet_errors", "fehler")
+        self.var("profile_sheets", "shared")
+        self.label(excel, "settings.profile_sheets").grid(row=7, column=0, sticky="nw", padx=(0, 8), pady=(8, 0))
+        layout = ttk.Frame(excel)
+        layout.grid(row=7, column=1, sticky="w", pady=(8, 0))
+        for value, key in (
+            ("shared", "settings.profile_sheets_shared"),
+            ("per_profile", "settings.profile_sheets_per_profile"),
+        ):
+            choice = ttk.Radiobutton(layout, variable=self.form["profile_sheets"], value=value)
+            self._translate(choice, key).pack(anchor="w")
 
         language = self._section(left, "settings.language")
         self.language_box = ttk.Combobox(language, state="readonly", values=list(LANGUAGES.values()), width=20)
@@ -691,13 +731,14 @@ class App:
                 self.form[key].set(value)
         try:
             rules_text = _read_text_or_empty(self.rules_path)
-            self.fields = RuleList(parse_rules_text(rules_text) if rules_text.strip() else [])
+            self.profiles = ProfileList(parse_rules_text(rules_text))
         except (OSError, ValueError) as exc:
-            self.fields, problem = RuleList([]), str(exc)
+            self.profiles, problem = ProfileList([]), str(exc)
         self.loading = False
         # Only a real change rewrites config.toml (opening the app keeps comments in a hand-edited file).
         self.saved_config_text = render_config_text(config) if not problem else ""
         self.apply_language()
+        self.refresh_profile_box()
         self.refresh_fields_view()
         self.select_field(0 if self.fields else None)
         self.refresh_sample_files()
@@ -746,7 +787,7 @@ class App:
 
     def save_rules(self) -> None:
         try:
-            self.rules_path.write_text(render_rules_text(self.fields.rules), encoding="utf-8")
+            self.rules_path.write_text(render_rules_text(self.profiles.profiles()), encoding="utf-8")
             self.save_status.configure(text=self.tr("status.saved"), foreground=GRAY)
         except OSError as exc:
             self.save_status.configure(text=f"⚠ {friendly_error(exc, self.lang)}", foreground=RED)
@@ -845,10 +886,21 @@ class App:
     def refresh_cards(self) -> None:
         values = self.values()
         self._set_card("mails", mails_status(values, self.config_dir, bool(self.password.get()), self.lang))
-        self._set_card("fields", fields_status(self.fields, self.previews, self.lang))
+        self._set_fields_card()
         excel_path = output_file_path(str(values.get("output_xlsx", "")), self.config_dir)
-        sheets = str(values.get("sheet_data") or "daten"), str(values.get("sheet_errors") or "fehler")
-        self._set_card("excel", excel_status(excel_path, *sheets, self.lang))
+        if values.get("profile_sheets") == "per_profile":
+            data_sheets = [profile.name for profile in self.profiles.profiles()]
+        else:
+            data_sheets = [str(values.get("sheet_data") or "daten")]
+        error_sheet = str(values.get("sheet_errors") or "fehler")
+        self._set_card("excel", excel_status(excel_path, data_sheets, error_sheet, self.lang))
+
+    def _set_fields_card(self) -> None:
+        if len(self.profiles) > 1:
+            status = profiles_status(len(self.profiles), self.profiles.field_count, self.best, self.lang)
+        else:
+            status = fields_status(self.fields, self.previews, self.lang)
+        self._set_card("fields", status)
 
     def toggle_details(self) -> None:
         self.details_visible = not self.details_visible
@@ -904,6 +956,9 @@ class App:
             SampleMail(title=problem.name, body=normalize_body(problem.body), header_text=problem.header_text)
         )
         self.notebook.select(2)
+        profile_index = self.profiles.find(problem.profile) if problem.profile else None
+        if profile_index is not None and profile_index != self.profiles.index:
+            self.show_profile(profile_index)
         columns = self.fields.columns()
         missing = [column for column in problem.missing if column in columns]
         if missing:
@@ -937,13 +992,13 @@ class App:
             messagebox.showerror(self.tr("app.title"), self.tr("error.fix_inputs"))
             self.jump_to_first_error()
             return
-        if not self.fields:
+        if not self.profiles.field_count:
             messagebox.showerror(self.tr("app.title"), self.tr("card.fields.none"))
             self.notebook.select(2)
             return
         try:
             app_config = load_app_config(self.cfg_path)
-            parsing_rules = self.fields.parsing_rules()
+            parsing_rules = self.profiles.parsing_rules()
         except (OSError, ValueError) as exc:
             messagebox.showerror(self.tr("app.title"), friendly_error(exc, self.lang))
             return
@@ -1152,6 +1207,88 @@ class App:
 
         threading.Thread(target=worker, daemon=True).start()
         self.root.after(150, poll)
+
+    # ------------------------------------------------------------------ profiles
+
+    def refresh_profile_box(self) -> None:
+        self.profile_box.configure(values=self.profiles.names)
+        self.profile_box.current(self.profiles.index)
+        self.remove_profile_button.state(["!disabled"] if len(self.profiles) > 1 else ["disabled"])
+
+    def show_profile(self, index: int) -> None:
+        """Show another profile's fields; pending edits are applied to the profile shown so far."""
+        self.flush_editor()
+        self.profiles.select(index)
+        self.editing_index = None
+        self.refresh_profile_box()
+        self.refresh_fields_view()
+        self.select_field(0 if self.fields else None)
+        self._update_undo_button()
+
+    def on_profile_selected(self) -> None:
+        index = self.profile_box.current()
+        if index != self.profiles.index:
+            self.show_profile(index)
+
+    def ask_profile_name(self, title_key: str, initial: str = "") -> str | None:
+        return simpledialog.askstring(
+            self.tr(title_key), self.tr("dialog.profile_name"), initialvalue=initial, parent=self.root
+        )
+
+    def new_profile(self) -> None:
+        self.flush_editor()
+        name = ""
+        while True:
+            name = self.ask_profile_name("dialog.profile_new", name)
+            if name is None:
+                return
+            try:
+                index = self.profiles.add(name, self.lang)
+                break
+            except ValueError as exc:
+                messagebox.showerror(self.tr("app.title"), str(exc))
+        # Not saved yet: a profile without fields is left out of the rules file until it has one.
+        self.show_profile(index)
+        self.save_status.configure(
+            text=self.tr("status.profile_added").format(name=self._quoted(self.profiles.current_name)),
+            foreground=GRAY,
+        )
+
+    def rename_profile(self) -> None:
+        self.flush_editor()
+        name = self.profiles.current_name
+        while True:
+            name = self.ask_profile_name("dialog.profile_rename", name)
+            if name is None or name.strip() == self.profiles.current_name:
+                return
+            try:
+                self.profiles.rename(name, self.lang)
+                break
+            except ValueError as exc:
+                messagebox.showerror(self.tr("app.title"), str(exc))
+        self.save_rules()
+        self.refresh_profile_box()
+        self.schedule_preview()
+        self.save_status.configure(
+            text=self.tr("status.profile_renamed").format(name=self._quoted(self.profiles.current_name)),
+            foreground=GRAY,
+        )
+
+    def remove_profile(self) -> None:
+        if len(self.profiles) < 2:
+            return
+        self.flush_editor()
+        name = self._quoted(self.profiles.current_name)
+        question = self.tr("confirm.profile_remove").format(name=name, count=len(self.fields))
+        if not messagebox.askyesno(self.tr("app.title"), question):
+            return
+        self.profiles.remove()
+        self.save_rules()
+        self.show_profile(self.profiles.index)
+        self.save_status.configure(text=self.tr("status.profile_removed").format(name=name), foreground=GRAY)
+
+    def _quoted(self, text: str) -> str:
+        return f"„{text}“" if self.lang == "de" else f"“{text}”"
 
     # ------------------------------------------------------------------ fields
 
@@ -1466,16 +1603,25 @@ class App:
             if preview is not None and not preview.found:
                 tags = ("missing_required",) if rule.required else ("missing_optional",)
             self.fields_view.item(iid, tags=tags)
+        self.best = None
+        if sample is not None and len(self.profiles) > 1:
+            try:
+                self.best = best_profile(self.profiles.parsing_rules(), sample)
+            except ValueError:  # no profile has fields yet
+                self.best = None
+        sheet = str(self.form["sheet_errors"].get()).strip() or "fehler"
         if sample is None:
             self.sample_summary.configure(text=self.tr("preview.no_sample_summary"), foreground=GRAY)
+        elif self.best is not None:
+            text = profile_summary_text(self.best, sheet, self.lang)
+            self.sample_summary.configure(text=text, foreground=GREEN if text.startswith("✓") else RED)
         elif self.fields and self.previews is not None:
-            sheet = str(self.form["sheet_errors"].get()).strip() or "fehler"
             text = summary_text(self.fields, self.previews, sheet, self.lang)
             self.sample_summary.configure(text=text, foreground=GREEN if text.startswith("✓") else RED)
         else:
             self.sample_summary.configure(text="")
         self._update_editor_preview(sample)
-        self._set_card("fields", fields_status(self.fields, self.previews, self.lang))
+        self._set_fields_card()
 
     def _update_editor_preview(self, sample: SampleMail | None) -> None:
         """Result of the rule being edited, and what is still wrong with its inputs (e.g. a duplicate column)."""

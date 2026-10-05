@@ -15,6 +15,8 @@ from openpyxl import load_workbook
 from pydantic import ValidationError
 
 from mailprocessor.config import (
+    DEFAULT_PROFILE_NAME,
+    SHEET_NAME_MAX_LENGTH,
     AppConfig,
     AppSection,
     EmlSourceConfig,
@@ -22,10 +24,13 @@ from mailprocessor.config import (
     ImapSourceConfig,
     MailFilter,
     ParsingRules,
+    Profile,
     SourceConfig,
+    profile_name_problem,
 )
 from mailprocessor.gui import setting_path, split_labels
 from mailprocessor.i18n import t
+from mailprocessor.parser import ParseResult
 from mailprocessor.preview import RulePreview, sample_files
 from mailprocessor.processor import Problem
 
@@ -52,6 +57,7 @@ def form_values(config: AppConfig) -> FormValues:
         "output_xlsx": app.output_xlsx,
         "sheet_data": app.sheet_data,
         "sheet_errors": app.sheet_errors,
+        "profile_sheets": app.profile_sheets,
         "log_level": app.log_level,
         "sqlite_path": app.sqlite_path,
         "max_age_days": str(app.max_age_days),
@@ -128,6 +134,7 @@ def config_from_form(values: FormValues, lang: str) -> tuple[AppConfig | None, d
                 output_xlsx=output,
                 sheet_data=sheet_data,
                 sheet_errors=sheet_errors,
+                profile_sheets="per_profile" if _text(values, "profile_sheets") == "per_profile" else "shared",
                 dry_run=bool(values.get("dry_run", False)),
                 max_messages=max_messages,
                 max_age_days=max_age_days,
@@ -212,13 +219,24 @@ def fields_status(rules: list[FieldRule], previews: list[RulePreview] | None, la
     return CardStatus(True, t("card.fields.ok", lang).format(count=count))
 
 
-def excel_status(path: Path, data_sheet: str, error_sheet: str, lang: str) -> CardStatus:
+def profiles_status(profile_count: int, field_count: int, best: ParseResult | None, lang: str) -> CardStatus:
+    """The fields card when there are several profiles: which profile the sample mail fits."""
+    count = t("card.profiles.count", lang).format(profiles=profile_count, fields=field_count)
+    if best is None:
+        return CardStatus(None, count)
+    if best.missing_required:
+        return CardStatus(False, t("card.profiles.none_fits", lang).format(count=count))
+    return CardStatus(True, t("card.profiles.fits", lang).format(count=count, profile=_quote(best.profile, lang)))
+
+
+def excel_status(path: Path, data_sheets: list[str], error_sheet: str, lang: str) -> CardStatus:
+    """`data_sheets`: the sheet for all rows, or one per profile."""
     if not path.exists():
         return CardStatus(None, t("card.excel.new", lang).format(file=path.name))
     try:
         workbook = load_workbook(path, read_only=True)
         try:
-            rows = _data_rows(workbook, data_sheet)
+            rows = sum(_data_rows(workbook, sheet) for sheet in data_sheets)
             problems = _data_rows(workbook, error_sheet)
         finally:
             workbook.close()
@@ -240,6 +258,8 @@ def problem_text(problem: Problem, lang: str) -> str:
     """What is wrong with a failed mail, for the problem list."""
     if problem.missing:
         columns = ", ".join(_quote(column, lang) for column in problem.missing)
+        if problem.profile:
+            return t("problems.missing_profile", lang).format(profile=_quote(problem.profile, lang), columns=columns)
         return t("problems.missing", lang).format(columns=columns)
     if problem.body is None:
         return t("problems.unreadable_short", lang)
@@ -316,6 +336,89 @@ class RuleList:
             self._removed = None
             return None
         return index
+
+
+class ProfileList:
+    """The profiles edited in the GUI, each with its own `RuleList`. The Felder tab shows one at a time.
+
+    A profile without fields is kept while editing but left out when saving or running.
+    """
+
+    def __init__(self, profiles: list[Profile]) -> None:
+        self.names = [profile.name for profile in profiles] or [DEFAULT_PROFILE_NAME]
+        self.fields = [RuleList(profile.fields) for profile in profiles] or [RuleList([])]
+        self.index = 0
+
+    def __len__(self) -> int:
+        return len(self.names)
+
+    @property
+    def current(self) -> RuleList:
+        return self.fields[self.index]
+
+    @property
+    def current_name(self) -> str:
+        return self.names[self.index]
+
+    @property
+    def field_count(self) -> int:
+        return sum(len(rules) for rules in self.fields)
+
+    def select(self, index: int) -> None:
+        if 0 <= index < len(self.names):
+            self.index = index
+
+    def find(self, name: str) -> int | None:
+        return self.names.index(name) if name in self.names else None
+
+    def name_problem(self, name: str, lang: str, except_index: int | None = None) -> str | None:
+        """Why `name` cannot be used for a new or renamed profile, in the user's language; None if it can."""
+        name = name.strip()
+        if not name:
+            return t("error.profile.name_empty", lang)
+        if len(name) > SHEET_NAME_MAX_LENGTH:
+            return t("error.profile.name_long", lang).format(max=SHEET_NAME_MAX_LENGTH)
+        if profile_name_problem(name):
+            return t("error.profile.name_chars", lang)
+        taken = [other for index, other in enumerate(self.names) if index != except_index]
+        if name.casefold() in (other.casefold() for other in taken):
+            return t("error.profile.name_taken", lang).format(name=_quote(name, lang))
+        return None
+
+    def add(self, name: str, lang: str) -> int:
+        """Add an empty profile and show it; raises ValueError with a message for the user."""
+        problem = self.name_problem(name, lang)
+        if problem:
+            raise ValueError(problem)
+        self.names.append(name.strip())
+        self.fields.append(RuleList([]))
+        self.index = len(self.names) - 1
+        return self.index
+
+    def rename(self, name: str, lang: str) -> None:
+        problem = self.name_problem(name, lang, except_index=self.index)
+        if problem:
+            raise ValueError(problem)
+        self.names[self.index] = name.strip()
+
+    def remove(self) -> str:
+        """Remove the shown profile (never the last one) and show its neighbour."""
+        if len(self.names) == 1:
+            raise ValueError("the last profile cannot be removed")
+        name = self.names.pop(self.index)
+        self.fields.pop(self.index)
+        self.index = min(self.index, len(self.names) - 1)
+        return name
+
+    def profiles(self) -> list[Profile]:
+        """The profiles to save: all that have fields."""
+        return [
+            Profile(name=name, fields=rules.rules) for name, rules in zip(self.names, self.fields, strict=True) if rules
+        ]
+
+    def parsing_rules(self) -> ParsingRules:
+        """Raises ValueError if no profile has fields yet."""
+        return ParsingRules(profiles=self.profiles())
 
 
 @dataclass(frozen=True)
