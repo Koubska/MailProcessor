@@ -41,13 +41,21 @@ def test_lint_checks_code_and_workflows() -> None:
 def test_builds_only_for_tags_after_tests_on_every_platform() -> None:
     build_job = _job("build")
 
-    assert TAG_CONDITION in build_job
+    assert "startsWith(github.ref, 'refs/tags/')" in build_job
     assert "needs: [test, lint]" in build_job
-    # Tag-only steps: the version from the tag and the provenance attestation (Dependabot PRs are built, not attested).
-    for step in ('uv version "${GITHUB_REF_NAME#v}"', "actions/attest-build-provenance"):
-        step_text = build_job[build_job.rindex("- ", 0, build_job.index(step)) : build_job.index(step)]
-        assert TAG_CONDITION in step_text, step
-    assert build_job.index("uv version") < build_job.index("scripts/build_executable.py")
+    # Only releases are attested; Dependabot and "build"-labelled PRs are built without it.
+    step = "actions/attest-build-provenance"
+    step_text = build_job[build_job.rindex("- ", 0, build_job.index(step)) : build_job.index(step)]
+    assert TAG_CONDITION in step_text
+    # The version step runs in every build (so it is tested before a release), with the tag on releases.
+    start, end = build_job.index("- name: Set the version"), build_job.index("scripts/build_executable.py")
+    version_step = build_job[start:end]
+    assert "if:" not in version_step
+    assert "startsWith(github.ref, 'refs/tags/') && github.ref_name" in version_step
+    assert 'uv version "${VERSION#v}" --frozen' in version_step
+    # bash syntax like ${VERSION#v} needs bash on Windows too (the default there is PowerShell).
+    assert re.search(r"\n    defaults:\n      run:\n(?: +#[^\n]*\n)* +shell: bash\n", build_job)
+    assert "contains(github.event.pull_request.labels.*.name, 'build')" in build_job
     assert "subject-path: dist/mailprocessor-${{ matrix.platform }}.zip" in build_job
     assert "id-token: write" in build_job and "attestations: write" in build_job
     assert "uv sync --locked --group build" in build_job
