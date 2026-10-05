@@ -1,3 +1,4 @@
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -120,7 +121,8 @@ def test_main_module_runs_as_script() -> None:
     result = subprocess.run([sys.executable, str(script), "--help"], capture_output=True, text=True, check=False)
 
     assert result.returncode == 0
-    assert "--config" in result.stdout
+    # On CI (e.g. GITHUB_ACTIONS set) Typer forces rich output with ANSI escape codes.
+    assert "--config" in re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
 
 
 def test_imap_password_is_read_from_environment(monkeypatch) -> None:
