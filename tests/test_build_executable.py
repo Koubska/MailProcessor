@@ -20,6 +20,17 @@ def test_resolve_executable_name_by_platform() -> None:
     assert module._resolve_executable_name("macos") == "mailprocessor"
 
 
+def test_icon_args_point_to_existing_icon_files() -> None:
+    module = _load_build_module()
+    for platform_label, suffix in (("windows", ".ico"), ("macos", ".icns")):
+        flag, icon_path = module._icon_args(platform_label)
+        assert flag == "--icon"
+        assert icon_path.endswith(suffix)
+        assert Path(icon_path).is_file()
+    assert module._icon_args("linux") == []
+    assert (module.ASSETS_DIR / "icon.png").is_file()
+
+
 def test_write_bundle_readme_mentions_config_and_command(tmp_path: Path) -> None:
     module = _load_build_module()
     module._write_bundle_readme(tmp_path, "mailprocessor")

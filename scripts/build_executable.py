@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 DEFAULTS_DIR = Path("src/mailprocessor/defaults")
+ASSETS_DIR = Path("src/mailprocessor/assets")
 
 
 def _detect_platform_label() -> str:
@@ -21,6 +22,12 @@ def _detect_platform_label() -> str:
 
 def _resolve_executable_name(platform_label: str) -> str:
     return "mailprocessor.exe" if platform_label == "windows" else "mailprocessor"
+
+
+def _icon_args(platform_label: str) -> list[str]:
+    """Executable icon: Windows embeds the .ico; macOS takes the .icns; Linux binaries have none."""
+    icon_file = {"windows": "icon.ico", "macos": "icon.icns"}.get(platform_label)
+    return ["--icon", str(ASSETS_DIR / icon_file)] if icon_file else []
 
 
 def _write_bundle_readme(bundle_dir: Path, executable_name: str) -> None:
@@ -79,6 +86,10 @@ def build_bundle(target_platform: str | None) -> Path:
             # Built-in defaults, used to recreate missing config files on first start.
             "--add-data",
             f"src/mailprocessor/defaults{os.pathsep}mailprocessor/defaults",
+            # Window icon (the GUI loads assets/icon.png).
+            "--add-data",
+            f"{ASSETS_DIR / 'icon.png'}{os.pathsep}mailprocessor/assets",
+            *_icon_args(platform_label),
             "src/mailprocessor/main.py",
         ]
     )

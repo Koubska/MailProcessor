@@ -1,4 +1,4 @@
-# mailprocessor
+# Mail Processor
 
 Überträgt Angaben aus E-Mails (z. B. Kursanmeldungen über ein Kontaktformular) in eine Excel-Tabelle.
 E-Mails werden nur gelesen, nie verändert. Alles läuft lokal, und jede E-Mail wird nur einmal übernommen.

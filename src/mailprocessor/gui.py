@@ -14,6 +14,7 @@ import threading
 import time
 import tomllib
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 
 from mailprocessor.config import (
@@ -250,6 +251,12 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
 
     root = tk.Tk()
     root.title(tr("app.title"))
+    try:
+        with resources.as_file(resources.files("mailprocessor") / "assets" / "icon.png") as icon_path:
+            app_icon = tk.PhotoImage(file=str(icon_path))
+        root.iconphoto(True, app_icon)
+    except (OSError, tk.TclError):
+        pass  # a missing icon is cosmetic; never block the app
     root.geometry("1060x760")
 
     container = ttk.Frame(root, padding=12)

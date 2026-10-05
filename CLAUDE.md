@@ -23,7 +23,7 @@ mailprocessor                                      # no arguments: opens the GUI
 python scripts/build_executable.py --target-platform {linux|macos|windows}   # PyInstaller one-file bundle -> dist/mailprocessor-<platform>.zip
 ```
 
-The build script refuses to cross-compile, so `--target-platform` must match the host. No linter or type checker is configured.
+The app icon lives in `src/mailprocessor/assets/` (`icon.png` for the Tk window, also package data and `--add-data`; `icon.ico`/`icon.icns` for the Windows/macOS executables). The build script refuses to cross-compile, so `--target-platform` must match the host. No linter or type checker is configured.
 
 ## Architecture
 

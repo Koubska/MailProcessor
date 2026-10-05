@@ -9,7 +9,7 @@ SUPPORTED_LANGUAGES = ("de", "en")
 
 CATALOG: dict[str, dict[str, str]] = {
     "de": {
-        "app.title": "mailprocessor",
+        "app.title": "Mail Processor",
         "label.language": "Sprache",
         "lang.de": "Deutsch",
         "lang.en": "Englisch",
@@ -105,7 +105,7 @@ CATALOG: dict[str, dict[str, str]] = {
         ),
     },
     "en": {
-        "app.title": "mailprocessor",
+        "app.title": "Mail Processor",
         "label.language": "Language",
         "lang.de": "German",
         "lang.en": "English",

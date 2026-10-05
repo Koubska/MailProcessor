@@ -29,5 +29,5 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-mailprocessor = ["defaults/*.toml"]
+mailprocessor = ["defaults/*.toml", "assets/icon.png"]
 
