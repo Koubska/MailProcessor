@@ -1,18 +1,34 @@
 import logging
 import queue
+import socket
+import ssl
 from pathlib import Path
 
 import pytest
 
+import mailprocessor.gui as gui_module
+from mailprocessor.errors import (
+    ImapLoginError,
+    MailFolderNotFoundError,
+    MissingPasswordError,
+    SheetColumnsError,
+    WorkbookLockedError,
+)
 from mailprocessor.gui import (
     QueueLogHandler,
     UiFieldRule,
     folder_setting,
+    friendly_error,
+    open_in_default_app,
+    output_file_path,
     parse_config_text,
     parse_rules_text,
     render_config_text,
     render_rules_text,
+    run_summary_text,
 )
+from mailprocessor.i18n import t
+from mailprocessor.processor import RunSummary
 
 
 def test_parse_rules_text_reads_fields() -> None:
@@ -129,3 +145,83 @@ def test_queue_log_handler_forwards_formatted_lines_respecting_level() -> None:
     assert kind == "log"
     assert line.endswith("WARNING Failed a.eml: Required fields missing: Name")
     assert sink.empty()
+
+
+def test_run_summary_text_reports_new_rows_problems_and_skipped() -> None:
+    summary = RunSummary(seen=5, processed=2, skipped=2, failed=1)
+
+    text = run_summary_text(summary, "mail_export.xlsx", "fehler", dry_run=False, lang="de")
+
+    assert text == (
+        "2 neue Zeile(n) in mail_export.xlsx eingetragen. "
+        "1 E-Mail(s) mit Problemen – Details im Blatt „fehler“. "
+        "2 bereits verarbeitete E-Mail(s) übersprungen."
+    )
+
+
+def test_run_summary_text_nothing_new() -> None:
+    summary = RunSummary(seen=3, processed=0, skipped=3, failed=0)
+
+    text = run_summary_text(summary, "out.xlsx", "errors", dry_run=False, lang="en")
+
+    assert text == "No new emails found. Skipped 3 email(s) processed earlier."
+
+
+def test_run_summary_text_dry_run_says_nothing_was_saved() -> None:
+    summary = RunSummary(seen=4, processed=3, skipped=0, failed=1)
+
+    text = run_summary_text(summary, "out.xlsx", "fehler", dry_run=True, lang="de")
+
+    assert "4 neue E-Mail(s)" in text and "3 fehlerfrei" in text and "1 mit Problemen" in text
+    assert "nichts gespeichert" in text
+
+
+@pytest.mark.parametrize(
+    ("exc", "key"),
+    [
+        (WorkbookLockedError("Cannot write out.xlsx"), "error.workbook_locked"),
+        (SheetColumnsError("has columns"), "error.sheet_columns"),
+        (MailFolderNotFoundError("EML folder does not exist"), "error.mail_folder_missing"),
+        (MissingPasswordError("IMAP password is missing"), "error.imap_password_missing"),
+        (ImapLoginError("IMAP login failed"), "error.imap_login"),
+        (ssl.SSLCertVerificationError("certificate verify failed"), "error.imap_tls"),
+        (socket.gaierror("Name or service not known"), "error.imap_connection"),
+        (ConnectionRefusedError("refused"), "error.imap_connection"),
+        (TimeoutError("timed out"), "error.imap_connection"),
+    ],
+)
+def test_friendly_error_explains_common_failures_and_keeps_details(exc: Exception, key: str) -> None:
+    message = friendly_error(exc, "de")
+
+    assert message.startswith(t(key, "de"))
+    assert message.endswith(f"Details: {exc}")
+
+
+def test_friendly_error_falls_back_to_the_original_message() -> None:
+    assert friendly_error(ValueError("Invalid regex pattern for column 'Name'"), "de") == (
+        "Invalid regex pattern for column 'Name'"
+    )
+
+
+def test_friendly_error_hides_unexpected_details() -> None:
+    message = friendly_error(KeyError("secret value"), "en")
+
+    assert "KeyError" in message
+    assert "secret value" not in message
+
+
+def test_output_file_path_is_relative_to_config_folder(tmp_path: Path) -> None:
+    assert output_file_path("./out/x.xlsx", tmp_path) == (tmp_path / "out" / "x.xlsx").resolve()
+    absolute = tmp_path / "elsewhere.xlsx"
+    assert output_file_path(str(absolute), Path("/unused")) == absolute
+
+
+@pytest.mark.parametrize(("platform", "command"), [("darwin", "open"), ("linux", "xdg-open")])
+def test_open_in_default_app_uses_the_system_opener(monkeypatch, tmp_path: Path, platform: str, command: str) -> None:
+    calls = []
+    monkeypatch.setattr(gui_module.sys, "platform", platform)
+    monkeypatch.setattr(gui_module.subprocess, "Popen", lambda args: calls.append(args))
+
+    open_in_default_app(tmp_path / "out.xlsx")
+
+    assert calls == [[command, str(tmp_path / "out.xlsx")]]

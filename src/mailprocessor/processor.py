@@ -11,6 +11,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from mailprocessor.config import AppConfig, ParsingRules
+from mailprocessor.errors import MailFolderNotFoundError
 from mailprocessor.excel_writer import ExcelOutput
 from mailprocessor.ledger import Ledger, LedgerKey, compute_content_hash
 from mailprocessor.models import MailReadError, NormalizedMail
@@ -84,7 +85,7 @@ def _check_eml_folder(app_cfg: AppConfig) -> None:
         return
     eml_folder = Path(app_cfg.source.eml.folder)
     if not eml_folder.is_dir():
-        raise FileNotFoundError(f"EML folder does not exist: {eml_folder}")
+        raise MailFolderNotFoundError(f"EML folder does not exist: {eml_folder}")
     for setting, value in (("output_xlsx", app_cfg.app.output_xlsx), ("sqlite_path", app_cfg.app.sqlite_path)):
         if Path(value).resolve().is_relative_to(eml_folder.resolve()):
             raise ValueError(f"{setting} must not be inside the mail folder {eml_folder}")

@@ -9,6 +9,8 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.worksheet.worksheet import Worksheet
 
+from mailprocessor.errors import SheetColumnsError, WorkbookLockedError
+
 # Always the last column of the data sheet: the full text of the mail.
 CONTENT_COLUMN = "E-Mail-Inhalt"
 EXCEL_CELL_LIMIT = 32_767
@@ -83,7 +85,7 @@ class ExcelOutput:
             sheet.cell(row=1, column=len(columns), value=CONTENT_COLUMN)
             return
         if header != columns:
-            raise ValueError(
+            raise SheetColumnsError(
                 f"Sheet '{name}' in {self.path} has columns {header}, but the parsing rules expect {columns}. "
                 "Use a new output file (output_xlsx) or restore the previous parsing rules."
             )
@@ -96,7 +98,7 @@ class ExcelOutput:
             with self.path.open("r+b"):
                 pass
         except PermissionError:
-            raise OSError(f"Cannot write {self.path}. Is it open in Excel? Close it and run again.") from None
+            raise WorkbookLockedError(f"Cannot write {self.path}. Is it open in Excel? Close it and run again.") from None
 
     def append_data(self, values: dict[str, str], content: str) -> None:
         row = [values.get(column, "") for column in self.data_columns]
@@ -126,6 +128,6 @@ class ExcelOutput:
             self.workbook.save(temp_path)
             os.replace(temp_path, self.path)
         except PermissionError:
-            raise OSError(f"Cannot write {self.path}. Is it open in Excel? Close it and run again.") from None
+            raise WorkbookLockedError(f"Cannot write {self.path}. Is it open in Excel? Close it and run again.") from None
         finally:
             temp_path.unlink(missing_ok=True)

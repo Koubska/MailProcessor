@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
+import socket
+import ssl
+import subprocess
+import sys
 import threading
 import time
 import tomllib
@@ -20,9 +25,17 @@ from mailprocessor.config import (
     SourceConfig,
     load_app_config,
     load_parsing_rules,
+    resolve_relative_paths,
+)
+from mailprocessor.errors import (
+    ImapLoginError,
+    MailFolderNotFoundError,
+    MissingPasswordError,
+    SheetColumnsError,
+    WorkbookLockedError,
 )
 from mailprocessor.i18n import resolve_language, t
-from mailprocessor.processor import run_pipeline
+from mailprocessor.processor import RunSummary, run_pipeline
 
 LOG_FORMAT = "%(asctime)s %(levelname)-7s %(message)s"
 
@@ -138,6 +151,63 @@ def folder_setting(chosen: Path, config_dir: Path) -> str:
     if chosen.is_relative_to(config_dir):
         return f"./{chosen.relative_to(config_dir).as_posix()}".removesuffix("/.")
     return str(chosen)
+
+
+def run_summary_text(summary: RunSummary, output_name: str, error_sheet: str, dry_run: bool, lang: str) -> str:
+    """Plain-language result of a run for the output box and status bar."""
+    if dry_run:
+        return t("summary.dry_run", lang).format(
+            new=summary.processed + summary.failed, ok=summary.processed, failed=summary.failed
+        )
+    parts = []
+    if summary.processed:
+        parts.append(t("summary.processed", lang).format(count=summary.processed, file=output_name))
+    if summary.failed:
+        parts.append(t("summary.failed", lang).format(count=summary.failed, sheet=error_sheet))
+    if not parts:
+        parts.append(t("summary.nothing_new", lang))
+    if summary.skipped:
+        parts.append(t("summary.skipped", lang).format(count=summary.skipped))
+    return " ".join(parts)
+
+
+# Most specific first: e.g. ImapLoginError and ssl.SSLError are OSErrors too.
+_FRIENDLY_ERRORS: tuple[tuple[type[BaseException] | tuple[type[BaseException], ...], str], ...] = (
+    (WorkbookLockedError, "error.workbook_locked"),
+    (SheetColumnsError, "error.sheet_columns"),
+    (MailFolderNotFoundError, "error.mail_folder_missing"),
+    (MissingPasswordError, "error.imap_password_missing"),
+    (ImapLoginError, "error.imap_login"),
+    (ssl.SSLError, "error.imap_tls"),
+    ((socket.gaierror, ConnectionError, TimeoutError), "error.imap_connection"),
+)
+
+
+def friendly_error(exc: BaseException, lang: str) -> str:
+    """Explain a failed run without jargon; the technical message follows as details."""
+    for error_types, key in _FRIENDLY_ERRORS:
+        if isinstance(exc, error_types):
+            return f"{t(key, lang)}\n\n{t('error.details', lang)}: {exc}"
+    if isinstance(exc, (ValueError, OSError)):
+        return str(exc)
+    return t("error.unexpected", lang).format(name=type(exc).__name__)
+
+
+def output_file_path(output_setting: str, config_dir: Path) -> Path:
+    """The Excel file a run writes to; relative settings are relative to the config file, like in a run."""
+    config = _default_config()
+    config.app.output_xlsx = output_setting or config.app.output_xlsx
+    return Path(resolve_relative_paths(config, config_dir).app.output_xlsx)
+
+
+def open_in_default_app(path: Path) -> None:
+    """Open a file with the program the system uses for it (Excel, LibreOffice, Numbers, ...)."""
+    if sys.platform == "win32":
+        os.startfile(path)
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
 
 
 def _default_config() -> AppConfig:
@@ -402,6 +472,7 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
         save_button.configure(text=tr("button.save"))
         reload_button.configure(text=tr("button.reload"))
         run_button.configure(text=tr("button.run"))
+        open_excel_button.configure(text=tr("button.open_excel"))
         add_update_button.configure(text=tr("button.field_add_update"))
         remove_button.configure(text=tr("button.field_remove"))
         up_button.configure(text=tr("button.field_up"))
@@ -567,6 +638,16 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
     log_handler = QueueLogHandler(run_results)
     package_logger.addHandler(log_handler)
 
+    def open_output() -> None:
+        path = output_file_path(output_xlsx_var.get().strip(), cfg_path.resolve().parent)
+        if not path.exists():
+            messagebox.showinfo(tr("app.title"), tr("info.no_excel_yet").format(file=path))
+            return
+        try:
+            open_in_default_app(path)
+        except OSError as exc:
+            messagebox.showerror(tr("app.title"), tr("error.open_excel").format(file=path, error=exc))
+
     def set_busy(busy: bool) -> None:
         state = tk.DISABLED if busy else tk.NORMAL
         for button in (run_button, save_button, reload_button):
@@ -575,12 +656,11 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
     def run_worker(app_config: AppConfig, parsing_rules: ParsingRules) -> None:
         # Runs off the UI thread; must not touch tkinter objects.
         try:
-            run_results.put(("ok", run_pipeline(app_config, parsing_rules)))
-        except (ValueError, OSError) as exc:
-            run_results.put(("error", str(exc)))
+            run_results.put(("ok", (app_config, run_pipeline(app_config, parsing_rules))))
         except Exception as exc:
-            package_logger.debug("Unexpected error", exc_info=True)
-            run_results.put(("error", f"Unexpected {type(exc).__name__}"))
+            if not isinstance(exc, (ValueError, OSError)):
+                package_logger.debug("Unexpected error", exc_info=True)
+            run_results.put(("error", exc))
 
     def poll_run_result() -> None:
         # Show all queued log lines; the run's result ("ok"/"error") is always the last item.
@@ -595,15 +675,21 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
             append_output(payload)
         set_busy(False)
         if kind == "ok":
-            append_output(
-                f"seen={payload.seen} processed={payload.processed} "
-                f"skipped={payload.skipped} failed={payload.failed}"
+            app_config, summary = payload
+            text = run_summary_text(
+                summary,
+                Path(app_config.app.output_xlsx).name,
+                app_config.app.sheet_errors,
+                app_config.app.dry_run,
+                current_language,
             )
-            status_var.set(tr("label.status.run_finished"))
+            append_output(text)
+            status_var.set(text)
         else:
-            append_output(f"ERROR   {payload}")
+            message = friendly_error(payload, current_language)
+            append_output(f"ERROR   {message}")
             status_var.set(tr("label.status.run_failed"))
-            messagebox.showerror(tr("app.title"), payload)
+            messagebox.showerror(tr("app.title"), message)
 
     def execute_run() -> None:
         try:
@@ -616,7 +702,7 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
                 app_config.source.imap.password = imap_password_var.get() or None
         except (ValueError, OSError) as exc:
             status_var.set(tr("label.status.run_failed"))
-            messagebox.showerror(tr("app.title"), str(exc))
+            messagebox.showerror(tr("app.title"), friendly_error(exc, current_language))
             return
         package_logger.setLevel(app_config.app.log_level)
         append_output(f"--- {time.strftime('%H:%M:%S')} ---")
@@ -633,6 +719,8 @@ def launch_gui(config_path: Path | None = None, rules_path: Path | None = None) 
     reload_button.pack(side="left", padx=(8, 0))
     run_button = ttk.Button(button_row, text=tr("button.run"), command=execute_run)
     run_button.pack(side="right")
+    open_excel_button = ttk.Button(button_row, text=tr("button.open_excel"), command=open_output)
+    open_excel_button.pack(side="right", padx=(0, 8))
 
     field_buttons = ttk.Frame(fields_tab)
     field_buttons.pack(fill=tk.X)

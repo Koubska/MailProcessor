@@ -65,6 +65,44 @@ CATALOG: dict[str, dict[str, str]] = {
         "view.field.required_no": "nein",
         "error.select_field_remove": "Bitte ein Feld zum Entfernen auswählen",
         "error.select_field_move": "Bitte ein Feld zum Verschieben auswählen",
+        "button.open_excel": "Excel öffnen",
+        "info.no_excel_yet": "Es gibt noch keine Excel-Datei ({file}). Sie entsteht beim ersten Klick auf „Ausführen“.",
+        "error.open_excel": "Die Excel-Datei konnte nicht geöffnet werden: {file}\n\n{error}",
+        "summary.dry_run": (
+            "Testlauf (Dry Run): {new} neue E-Mail(s) gefunden, davon {ok} fehlerfrei und {failed} mit Problemen. "
+            "Es wurde nichts gespeichert."
+        ),
+        "summary.processed": "{count} neue Zeile(n) in {file} eingetragen.",
+        "summary.failed": "{count} E-Mail(s) mit Problemen – Details im Blatt „{sheet}“.",
+        "summary.nothing_new": "Keine neuen E-Mails gefunden.",
+        "summary.skipped": "{count} bereits verarbeitete E-Mail(s) übersprungen.",
+        "error.details": "Details",
+        "error.workbook_locked": (
+            "Die Excel-Datei ist gerade in einem anderen Programm geöffnet. "
+            "Bitte Excel schließen und erneut auf „Ausführen“ klicken."
+        ),
+        "error.sheet_columns": (
+            "Die Spalten in der Excel-Datei passen nicht mehr zu den Parsing-Feldern. "
+            "Bitte im Reiter „App-Konfiguration“ einen neuen Output-XLSX-Pfad eintragen "
+            "oder die vorherigen Felder wiederherstellen."
+        ),
+        "error.mail_folder_missing": (
+            "Der E-Mail-Ordner wurde nicht gefunden. "
+            "Bitte im Reiter „App-Konfiguration“ über „Durchsuchen …“ einen vorhandenen Ordner auswählen."
+        ),
+        "error.imap_password_missing": "Bitte im Reiter „App-Konfiguration“ das IMAP-Passwort eingeben.",
+        "error.imap_login": "Anmeldung am Mailserver fehlgeschlagen. Bitte Benutzername und Passwort prüfen.",
+        "error.imap_tls": (
+            "Keine sichere Verbindung zum Mailserver möglich. "
+            "Bitte Host, Port und die Einstellung „SSL verwenden“ prüfen."
+        ),
+        "error.imap_connection": (
+            "Der Mailserver ist nicht erreichbar. "
+            "Bitte Internetverbindung sowie Host und Port prüfen."
+        ),
+        "error.unexpected": (
+            "Unerwarteter Fehler ({name}). Für Details den Log-Level auf DEBUG stellen und erneut ausführen."
+        ),
     },
     "en": {
         "app.title": "mailprocessor",
@@ -123,6 +161,31 @@ CATALOG: dict[str, dict[str, str]] = {
         "view.field.required_no": "no",
         "error.select_field_remove": "Select a field row to remove",
         "error.select_field_move": "Select a field row to move",
+        "button.open_excel": "Open Excel",
+        "info.no_excel_yet": "There is no Excel file yet ({file}). It is created by the first click on “Run”.",
+        "error.open_excel": "Could not open the Excel file: {file}\n\n{error}",
+        "summary.dry_run": (
+            "Dry run: found {new} new email(s), {ok} without problems and {failed} with problems. "
+            "Nothing was saved."
+        ),
+        "summary.processed": "Added {count} new row(s) to {file}.",
+        "summary.failed": "{count} email(s) with problems – see the “{sheet}” sheet.",
+        "summary.nothing_new": "No new emails found.",
+        "summary.skipped": "Skipped {count} email(s) processed earlier.",
+        "error.details": "Details",
+        "error.workbook_locked": "The Excel file is open in another program. Close Excel and click “Run” again.",
+        "error.sheet_columns": (
+            "The columns in the Excel file no longer match the parsing fields. "
+            "Enter a new output xlsx path in the “App config” tab or restore the previous fields."
+        ),
+        "error.mail_folder_missing": (
+            "The email folder was not found. Use “Browse …” in the “App config” tab to choose an existing folder."
+        ),
+        "error.imap_password_missing": "Enter the IMAP password in the “App config” tab.",
+        "error.imap_login": "The mail server rejected the login. Check username and password.",
+        "error.imap_tls": "Could not connect securely to the mail server. Check host, port and “Use SSL”.",
+        "error.imap_connection": "The mail server cannot be reached. Check the internet connection, host and port.",
+        "error.unexpected": "Unexpected error ({name}). Set the log level to DEBUG and run again for details.",
         "test.only_en": "English fallback",
     },
 }

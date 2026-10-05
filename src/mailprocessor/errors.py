@@ -1,0 +1,26 @@
+"""Expected failures with a plain-language explanation in the GUI.
+
+They subclass ValueError/OSError, so the CLI keeps handling them like before.
+"""
+
+from __future__ import annotations
+
+
+class MailFolderNotFoundError(FileNotFoundError):
+    """The configured .eml folder does not exist."""
+
+
+class WorkbookLockedError(OSError):
+    """The Excel file cannot be written, typically because it is open in Excel."""
+
+
+class SheetColumnsError(ValueError):
+    """An existing sheet has different columns than the parsing rules."""
+
+
+class ImapLoginError(OSError):
+    """The IMAP server rejected username or password."""
+
+
+class MissingPasswordError(ValueError):
+    """No IMAP password was given."""

@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from mailprocessor.config import ImapSourceConfig
+from mailprocessor.errors import ImapLoginError, MissingPasswordError
 from mailprocessor.models import MailReadError, NormalizedMail
 from mailprocessor.sources.email_content import parse_message_bytes
 
@@ -131,7 +132,7 @@ def iter_imap_messages(
     now_utc: datetime | None = None,
 ) -> Iterator[NormalizedMail | MailReadError]:
     if not config.password:
-        raise ValueError("IMAP password is missing")
+        raise MissingPasswordError("IMAP password is missing")
     search_args = _build_search_args(config.sender_filter, max_age_days, now_utc or datetime.now(UTC))
     if client_factory is None:
         client_factory = default_client_factory(config.use_ssl)
@@ -148,7 +149,7 @@ def iter_imap_messages(
             status = "NO"
         if status != "OK":
             # Deliberately no server response text and no credentials in the message.
-            raise OSError(f"IMAP login failed for user {config.username!r}; check username and password")
+            raise ImapLoginError(f"IMAP login failed for user {config.username!r}; check username and password")
 
         logger.info("Logged in as %s", config.username)
         client.examine(config.mailbox)
