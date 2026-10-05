@@ -9,7 +9,12 @@ import pytest
 
 from mailprocessor.config import ImapSourceConfig
 from mailprocessor.models import MailReadError
-from mailprocessor.sources.imap_source import ReadOnlyImapClient, default_client_factory, iter_imap_messages
+from mailprocessor.sources.imap_source import (
+    ReadOnlyImapClient,
+    check_imap_connection,
+    default_client_factory,
+    iter_imap_messages,
+)
 
 
 def _build_raw_message(message_id: str | None, body: str) -> bytes:
@@ -332,3 +337,25 @@ def test_iter_imap_messages_reports_total_before_fetching() -> None:
 
     assert totals == [2]
     items.close()
+
+
+def test_check_imap_connection_opens_mailbox_read_only_without_fetching() -> None:
+    fake_client = FakeImapClient()
+
+    count = check_imap_connection(_cfg(), client_factory=lambda _host, _port: fake_client)
+
+    assert count == 2
+    assert fake_client.selected_readonly is True
+    assert fake_client.search_calls == [] and fake_client.fetch_calls == []
+    assert fake_client.logout_called
+
+
+def test_check_imap_connection_reports_login_failure_and_logs_out() -> None:
+    class RejectingClient(FakeImapClient):
+        def login(self, username: str, password: str):
+            return "NO", [b"denied"]
+
+    fake_client = RejectingClient()
+    with pytest.raises(OSError, match="login failed"):
+        check_imap_connection(_cfg(), client_factory=lambda _host, _port: fake_client)
+    assert fake_client.logout_called

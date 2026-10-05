@@ -43,14 +43,21 @@ class ReadOnlyImapClient:
     def login(self, user: str, password: str):
         return self._client.login(user, password)
 
-    def examine(self, mailbox: str) -> None:
-        """Open the mailbox with EXAMINE and require the server's [READ-ONLY] confirmation."""
-        status, _ = self._client.select(mailbox, readonly=True)
+    def examine(self, mailbox: str) -> int | None:
+        """Open the mailbox with EXAMINE and require the server's [READ-ONLY] confirmation.
+
+        Returns the number of messages the server reports for the mailbox, if it is readable.
+        """
+        status, data = self._client.select(mailbox, readonly=True)
         if status != "OK":
             raise OSError(f"Failed to open mailbox in readonly mode: {mailbox}")
-        _code, data = self._client.response("READ-ONLY")
-        if not data or data[0] is None:
+        _code, confirmation = self._client.response("READ-ONLY")
+        if not confirmation or confirmation[0] is None:
             raise OSError(f"IMAP server did not confirm read-only access to {mailbox}; aborting without reading mail")
+        try:
+            return int(data[0])
+        except (TypeError, ValueError, IndexError):
+            return None
 
     def uid_search(self, *criteria: str):
         return self._client.uid("search", None, *criteria)
@@ -125,6 +132,44 @@ def _read_error(source_location: str, uid: bytes, reason: str) -> MailReadError:
     )
 
 
+def _connect_and_login(
+    config: ImapSourceConfig, client_factory: Callable[[str, int], ImapClient] | None
+) -> ReadOnlyImapClient:
+    if not config.password:
+        raise MissingPasswordError("IMAP password is missing")
+    if client_factory is None:
+        client_factory = default_client_factory(config.use_ssl)
+    logger.info(
+        "Connecting to %s:%s (%s)", config.host, config.port, "SSL" if config.use_ssl else "STARTTLS"
+    )
+    client = ReadOnlyImapClient(client_factory(config.host, config.port))
+    try:
+        status, _ = client.login(config.username, config.password)
+    except imaplib.IMAP4.error:
+        status = "NO"
+    if status != "OK":
+        client.logout()
+        # Deliberately no server response text and no credentials in the message.
+        raise ImapLoginError(f"IMAP login failed for user {config.username!r}; check username and password")
+    logger.info("Logged in as %s", config.username)
+    return client
+
+
+def check_imap_connection(
+    config: ImapSourceConfig, client_factory: Callable[[str, int], ImapClient] | None = None
+) -> int | None:
+    """Log in and open the mailbox read-only, without reading any message. Returns the server's message count."""
+    client = _connect_and_login(config, client_factory)
+    try:
+        count = client.examine(config.mailbox)
+        logger.info("Connection test: opened mailbox %s read-only", config.mailbox)
+        return count
+    except imaplib.IMAP4.error as exc:
+        raise OSError(f"IMAP error: {exc}") from None
+    finally:
+        client.logout()
+
+
 def iter_imap_messages(
     config: ImapSourceConfig,
     client_factory: Callable[[str, int], ImapClient] | None = None,
@@ -133,27 +178,10 @@ def iter_imap_messages(
     on_total: Callable[[int], None] | None = None,
 ) -> Iterator[NormalizedMail | MailReadError]:
     """Yield the matching messages; `on_total` receives their number before the first one is fetched."""
-    if not config.password:
-        raise MissingPasswordError("IMAP password is missing")
     search_args = _build_search_args(config.sender_filter, max_age_days, now_utc or datetime.now(UTC))
-    if client_factory is None:
-        client_factory = default_client_factory(config.use_ssl)
-
     source_location = f"imap://{config.host}:{config.port}/{config.mailbox}"
-    logger.info(
-        "Connecting to %s:%s (%s)", config.host, config.port, "SSL" if config.use_ssl else "STARTTLS"
-    )
-    client = ReadOnlyImapClient(client_factory(config.host, config.port))
+    client = _connect_and_login(config, client_factory)
     try:
-        try:
-            status, _ = client.login(config.username, config.password)
-        except imaplib.IMAP4.error:
-            status = "NO"
-        if status != "OK":
-            # Deliberately no server response text and no credentials in the message.
-            raise ImapLoginError(f"IMAP login failed for user {config.username!r}; check username and password")
-
-        logger.info("Logged in as %s", config.username)
         client.examine(config.mailbox)
         logger.info("Opened mailbox %s read-only", config.mailbox)
 

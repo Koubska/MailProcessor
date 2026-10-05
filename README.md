@@ -28,22 +28,26 @@ py -3 -m venv .venv; .venv\Scripts\pip install -q -e .; .venv\Scripts\mailproces
 
 ## Verwendung
 
-1. Reiter **App-Konfiguration**: Quelle wählen. Entweder **eml** (gespeicherte `.eml`-Dateien im Ordner
-   `mails`, oder mit **Durchsuchen …** einen anderen Ordner wählen) oder **imap** (Ihr Postfach; das
-   Passwort wird nie gespeichert).
-2. Reiter **Parsing-Felder**: eine Regel pro Excel-Spalte. Unter **Art** wählen, wie der Wert gefunden wird,
-   z. B. **Text nach Bezeichnung** mit der Bezeichnung `Telefonnummer:`. Rechts wird eine Beispiel-Mail
-   angezeigt; dort sehen Sie sofort, was jede Regel findet. Die Standardregeln passen zu
-   [docs/example.eml](docs/example.eml).
-3. Auf **Ausführen** klicken.
+Das Programm hat vier Reiter, in dieser Reihenfolge einzurichten:
+
+1. **E-Mails:** wählen, woher die E-Mails kommen – aus einem **Ordner** mit gespeicherten `.eml`-Dateien
+   oder **direkt aus dem Postfach** (IMAP; mit **Verbindung testen** prüfen, das Passwort wird nie gespeichert).
+2. **Felder:** eine Zeile pro Excel-Spalte. Unter **Art** wählen, wie der Wert gefunden wird, z. B.
+   **Text nach Bezeichnung** mit der Bezeichnung `Telefonnummer:`. Rechts zeigt eine Beispiel-Mail sofort,
+   was gefunden wird. Die Standardregeln passen zu [docs/example.eml](docs/example.eml).
+3. **Start:** zeigt, ob alles bereit ist. **Jetzt übertragen** klicken; **Testlauf** zeigt vorher, was
+   passieren würde, ohne etwas zu speichern. **Excel öffnen** öffnet das Ergebnis.
+4. **Einstellungen:** Excel-Datei, Sprache und Weiteres – meist nicht nötig.
+
+Alle Änderungen werden automatisch gespeichert.
 
 Die Ergebnisse landen in `out/mail_export.xlsx`: Das Blatt **daten** enthält eine Zeile pro E-Mail; die
 letzte Spalte **E-Mail-Inhalt** enthält jeweils den vollständigen Text der E-Mail. Das Blatt **fehler** listet
-E-Mails, die nicht verarbeitet werden konnten, mit Grund. Einfach erneut ausführen, wenn neue E-Mails
+E-Mails, die nicht verarbeitet werden konnten, mit Grund. Einfach erneut übertragen, wenn neue E-Mails
 eingehen; nur neue werden hinzugefügt.
 
-Bei Problemen: unter **Erweiterte Einstellungen → Protokoll öffnen** steht, was passiert ist. Das Protokoll
-enthält keine E-Mail-Inhalte und kann einer Fehlermeldung beigelegt werden.
+Bei Problemen: unter **Einstellungen → Protokoll öffnen** steht, was passiert ist. Das Protokoll enthält
+keine E-Mail-Inhalte und kann einer Fehlermeldung beigelegt werden.
 
 ## Entwicklung
 

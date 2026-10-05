@@ -217,19 +217,17 @@ The GUI edits `config.toml` and `parsing_rules.toml`, so normal users do not nee
 
 # 13. GUI
 
-Built with `tkinter`; intentionally small:
+Built with `tkinter` (`gui_app.py`; testable logic in `gui.py`, `ui_model.py`, `preview.py`). Four tabs in the order of setup and use:
 
-* Main settings: source (IMAP, or an `.eml` folder chosen with a folder picker; the file pattern is only configurable in `config.toml`) and the Excel file (file picker)
-* Technical settings (log level, SQLite path, sheet names, limits) under a collapsed "Erweiterte Einstellungen" section
-* Editor for parsing fields (new, add/update, remove, reorder) with the rule types from section 8
-* Live test with a sample mail ("Test mit Beispiel-Mail", `preview.py`): the first mail of the configured folder is shown automatically (◀ ▶ steps through the folder); any `.eml` can be loaded, or mail text pasted. The rule list shows each rule's result (missing required fields in red), the editor shows the result of the rule being edited while typing and highlights the value in the mail text, and a summary says whether the mail would go to the data or the error sheet. Values are computed like in a run, including the header fallback. Sample mails are only read; edits to the shown text change no file.
-* Save and reload; "Testlauf" runs with `dry_run` (nothing is written), "Ausführen" runs for real. The `dry_run` value in `config.toml` is kept but ignored by the GUI
-* "Excel öffnen" opens the workbook with the system's default program
-* Progress bar with "Verarbeite E-Mail n von N" and a "Stopp" button while a run is active
-* Plain-language run summary and error messages with a concrete next step; technical details stay visible
-* German by default, English available
+* **Start:** status cards for the e-mail source (folder and number of mails, or mailbox and whether the password is entered), the fields (and whether the sample mail is complete) and the Excel file (rows and problems), each with an action ("Ändern", "Bearbeiten", "Excel öffnen"). Large "Jetzt übertragen" button and "Testlauf" (`dry_run`, nothing is written; the `dry_run` value in `config.toml` is kept but ignored by the GUI). While running: progress "Verarbeite E-Mail n von N" and "Stopp". The result in plain language; the log only under "Details anzeigen".
+* **E-Mails:** choice between a folder of `.eml` files (folder picker, "Ordner öffnen", number of mails; the file pattern is only configurable in `config.toml`) and the mailbox (IMAP) with explained inputs; the port follows "Verschlüsselte Verbindung (SSL)". "Verbindung testen" logs in and opens the mailbox read-only without reading any message (`imap_source.check_imap_connection`). The inactive choice is greyed out but kept.
+* **Felder:** rule list and editor with the rule types from section 8, next to the live test with a sample mail (`preview.py`): the first mail of the configured folder is shown automatically (◀ ▶ steps through the folder); any `.eml` can be loaded, or mail text pasted. The list shows each rule's result (missing required fields in red), the editor shows the result of the rule being edited while typing and highlights the value in the mail text, and a summary says whether the mail would go to the data or the error sheet. Values are computed like in a run, including the header fallback. Sample mails are only read. Changes to the selected field apply as soon as they are valid; new fields are added with "Feld hinzufügen"; deleting asks first.
+* **Einstellungen:** Excel file (file picker) and sheet names, language, limits, maintenance ("Alles neu exportieren", "Protokoll öffnen", settings folder) and technical settings (log level, SQLite path, file locations).
+* Every change is saved automatically once valid (`ui_model.config_from_form` validates per input); invalid inputs are marked in red next to the field and not saved. Closing with invalid inputs or during a run asks first. The IMAP password is never written to disk.
+* Plain-language error messages with a concrete next step; technical details stay visible.
+* German by default, English available.
 
-The pipeline runs on a background thread so the window stays responsive.
+The pipeline and the connection test run on background threads so the window stays responsive.
 
 ---
 

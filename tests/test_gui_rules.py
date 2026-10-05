@@ -240,7 +240,7 @@ def test_run_summary_text_mentions_a_stopped_run() -> None:
     text = run_summary_text(summary, "out.xlsx", "fehler", dry_run=False, lang="de")
 
     assert text == (
-        "Angehalten – beim nächsten Ausführen geht es an dieser Stelle weiter. "
+        "Angehalten – bei der nächsten Übertragung geht es an dieser Stelle weiter. "
         "2 neue Zeile(n) in out.xlsx eingetragen."
     )
 
