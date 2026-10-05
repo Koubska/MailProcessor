@@ -12,7 +12,8 @@ def _job(name: str) -> str:
     """Text of one job: from `  name:` up to the next job at the same indentation."""
     content = WORKFLOW.read_text(encoding="utf-8")
     start = content.index(f"\n  {name}:\n")
-    following = [content.find(f"\n  {other}:\n", start + 1) for other in ("test", "lint", "build", "release")]
+    jobs = ("test", "lint", "build", "release", "dependabot-merge")
+    following = [content.find(f"\n  {other}:\n", start + 1) for other in jobs]
     end = min((pos for pos in following if pos > start), default=len(content))
     return content[start:end]
 
@@ -42,6 +43,12 @@ def test_builds_only_for_tags_after_tests_on_every_platform() -> None:
 
     assert TAG_CONDITION in build_job
     assert "needs: [test, lint]" in build_job
+    # Tag-only steps: the version check and the provenance attestation (Dependabot PRs are built, not attested).
+    for step in ("scripts/check_version.py", "actions/attest-build-provenance"):
+        step_text = build_job[build_job.rindex("- ", 0, build_job.index(step)) : build_job.index(step)]
+        assert TAG_CONDITION in step_text, step
+    assert "subject-path: dist/mailprocessor-${{ matrix.platform }}.zip" in build_job
+    assert "id-token: write" in build_job and "attestations: write" in build_job
     # The version check runs before anything is built.
     assert build_job.index("scripts/check_version.py") < build_job.index("scripts/build_executable.py")
     assert "uv sync --locked --group build" in build_job
@@ -75,3 +82,15 @@ def test_dependabot_updates_python_packages_and_actions() -> None:
     assert 'package-ecosystem: "uv"' in config
     assert 'package-ecosystem: "github-actions"' in config
     assert (REPO / "uv.lock").is_file()
+
+
+def test_dependabot_merges_only_small_updates_after_everything_passed() -> None:
+    merge_job = _job("dependabot-merge")
+
+    assert "needs: [test, lint, build]" in merge_job
+    assert "github.event.pull_request.user.login == 'dependabot[bot]'" in merge_job
+    assert "version-update:semver-patch" in merge_job and "version-update:semver-minor" in merge_job
+    assert "semver-major" not in merge_job
+    assert TAG_CONDITION not in merge_job
+    # Release stays tag-only.
+    assert _job("release").count("dependabot") == 0

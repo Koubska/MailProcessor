@@ -56,5 +56,7 @@ keine E-Mail-Inhalte und kann einer Fehlermeldung beigelegt werden.
 uv run pytest
 ```
 
+Herkunft eines Downloads prüfen: `gh attestation verify mailprocessor-windows.zip --repo Koubska/MailProcessor`.
+
 Spezifikation: [docs/requirements.md](docs/requirements.md). Regeln für Mitwirkende: [AGENTS.md](AGENTS.md).
 Lizenz: [MIT](LICENSE).
