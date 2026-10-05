@@ -5,7 +5,7 @@ from pathlib import Path
 
 SOURCES = Path(__file__).resolve().parents[1] / "src" / "mailprocessor" / "sources"
 
-ALLOWED_CLIENT_CALLS = "login|select|response|uid|logout|examine|uid_search|uid_fetch|starttls|shutdown"
+ALLOWED_CLIENT_CALLS = "login|authenticate|select|response|uid|logout|examine|uid_search|uid_fetch|starttls|shutdown"
 
 FORBIDDEN = [
     rf"\b_?client\.(?!(?:{ALLOWED_CLIENT_CALLS})\()\w+\(",  # any other IMAP command (STORE, COPY, EXPUNGE, ...)
@@ -31,6 +31,6 @@ def test_imap_commands_only_go_through_read_only_wrapper() -> None:
     source = (SOURCES / "imap_source.py").read_text(encoding="utf-8")
     raw_calls = re.findall(r"self\._client\.(\w+)\(", source)
 
-    assert set(raw_calls) == {"login", "select", "response", "uid", "logout"}
+    assert set(raw_calls) == {"login", "authenticate", "select", "response", "uid", "logout"}
     assert 'self._client.select(mailbox_argument(mailbox), readonly=True)' in source
     assert re.findall(r'self\._client\.uid\("(\w+)"', source) == ["search", "fetch"]

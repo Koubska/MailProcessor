@@ -6,6 +6,7 @@ the \\Seen side effect of non-PEEK fetches, then checks the mailbox is unchanged
 
 from __future__ import annotations
 
+import base64
 import copy
 import imaplib
 import re
@@ -19,7 +20,7 @@ from openpyxl import load_workbook
 from mailprocessor.config import AppConfig, AppSection, FieldRule, ImapSourceConfig, ParsingRules, SourceConfig
 from mailprocessor.processor import run_pipeline
 
-ALLOWED_COMMANDS = {"CAPABILITY", "LOGIN", "EXAMINE", "UID SEARCH", "UID FETCH", "LOGOUT"}
+ALLOWED_COMMANDS = {"CAPABILITY", "LOGIN", "AUTHENTICATE", "EXAMINE", "UID SEARCH", "UID FETCH", "LOGOUT"}
 
 
 def _message(message_id: str | None, name: str) -> bytes:
@@ -35,6 +36,8 @@ class MailboxState:
             202: {"flags": {"\\Flagged"}, "body": _message(None, "Ben")},
         }
         self.commands: list[str] = []
+        # (user, password) of each successful login, as the server decoded them.
+        self.logins: list[tuple[str, str]] = []
         self.lock = threading.Lock()
 
 
@@ -45,7 +48,7 @@ class _Handler(socketserver.StreamRequestHandler):
         self.wfile.write(line if isinstance(line, bytes) else line.encode())
 
     def handle(self) -> None:
-        self._send("* OK [CAPABILITY IMAP4rev1] scripted test server ready\r\n")
+        self._send("* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] scripted test server ready\r\n")
         while True:
             raw = self.rfile.readline()
             if not raw:
@@ -58,7 +61,15 @@ class _Handler(socketserver.StreamRequestHandler):
             if verb == "CAPABILITY":
                 self._send(f"* CAPABILITY IMAP4rev1\r\n{tag} OK done\r\n")
             elif verb == "LOGIN":
+                _, user, password = rest.split(" ", 2)
+                self.state.logins.append((user, password.strip('"')))
                 self._send(f"{tag} OK logged in\r\n")
+            elif verb == "AUTHENTICATE" and upper.split()[1:] == ["PLAIN"]:
+                # RFC 4616: base64 of "authzid NUL user NUL password", UTF-8.
+                self._send("+ \r\n")
+                _authzid, user, password = base64.b64decode(self.rfile.readline().strip()).decode().split("\0")
+                self.state.logins.append((user, password))
+                self._send(f"{tag} OK authenticated\r\n")
             elif verb == "EXAMINE":
                 self._send(f"* {len(self.state.messages)} EXISTS\r\n{tag} OK [READ-ONLY] EXAMINE completed\r\n")
             elif verb == "UID SEARCH":
@@ -101,13 +112,13 @@ def imap_server(monkeypatch):
         server.server_close()
 
 
-def _config(tmp_path: Path, port: int, mailbox: str = "INBOX") -> AppConfig:
+def _config(tmp_path: Path, port: int, mailbox: str = "INBOX", password: str = "pw") -> AppConfig:
     return AppConfig(
         app=AppSection(sqlite_path=str(tmp_path / "ledger.db"), output_xlsx=str(tmp_path / "out.xlsx")),
         source=SourceConfig(
             type="imap",
             imap=ImapSourceConfig(
-                host="127.0.0.1", port=port, username="u", password="pw", mailbox=mailbox, use_ssl=True
+                host="127.0.0.1", port=port, username="u", password=password, mailbox=mailbox, use_ssl=True
             ),
         ),
     )
@@ -159,3 +170,24 @@ def test_mailbox_names_with_spaces_and_umlauts_reach_the_server_quoted(imap_serv
 
     assert summary.processed == 2
     assert 'EXAMINE "Anfragen Sch&APw-ler"' in state.commands
+
+
+def test_passwords_with_non_ascii_characters_log_in(imap_server, tmp_path: Path) -> None:
+    state, port = imap_server
+    config = _config(tmp_path, port, password="Schlüssel§2026€")
+
+    summary = run_pipeline(config, ParsingRules(fields=[FieldRule(column="Name", pattern=r"(?m)^Name:\s*(.+)$")]))
+
+    assert summary.processed == 2
+    assert state.logins == [("u", "Schlüssel§2026€")]
+
+
+def test_ascii_passwords_still_use_login(imap_server, tmp_path: Path) -> None:
+    state, port = imap_server
+
+    rules = ParsingRules(fields=[FieldRule(column="Name", pattern=r"(?m)^Name:\s*(.+)$")])
+
+    run_pipeline(_config(tmp_path, port), rules)
+
+    assert state.logins == [("u", "pw")]
+    assert not any(command.upper().startswith("AUTHENTICATE") for command in state.commands)
