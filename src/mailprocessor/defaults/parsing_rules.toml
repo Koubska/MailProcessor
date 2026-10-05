@@ -1,0 +1,25 @@
+[[fields]]
+column = "Mail-Adresse"
+# "Von:" line in the text, or the mail's "From:" header; with or without <...> around the address.
+pattern = "(?im)^[ \\t]*(?:Von|From):.*?([a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,})"
+required = true
+
+[[fields]]
+column = "Name"
+pattern = "(?im)mein\\s+Kind\\s+(.+?)\\s+f[uü]r\\s+folgendes\\s+Angebot"
+required = true
+
+[[fields]]
+column = "Kurs"
+pattern = "(?im)^\\s*Angebot:\\s*(.+?)\\s*$"
+required = true
+
+[[fields]]
+column = "Zeit"
+pattern = "(?im)^\\s*Tag:\\s*(.+?)\\s*$"
+required = true
+
+[[fields]]
+column = "Telefonnummer"
+pattern = "(?im)^\\s*Telefonnummer:\\s*(.+?)\\s*$"
+required = true

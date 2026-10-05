@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Local runtime artifacts
+data/
+out/
+*.spec
+.DS_Store
+
+# Created on first GUI start when running from a checkout
+/config.toml
+/parsing_rules.toml
+/mails/
+uv.lock

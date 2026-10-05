@@ -1,0 +1,257 @@
+# mailprocessor Requirements
+
+## 1. Purpose
+
+`mailprocessor` reads emails, extracts structured fields from their bodies using configurable regular expressions, and exports the results to an Excel workbook.
+
+The typical input is a stream of form-generated emails (for example, a school's contact form for course registrations, see `docs/example.eml`) that arrive among many unrelated messages.
+
+The emails are confidential. All processing happens locally on the user's computer.
+
+---
+
+# 2. Target environment
+
+* Windows 10/11 (primary), macOS and Linux
+* Standalone executable built with PyInstaller; end users do not need Python
+* Python 3.12+ for development
+
+Starting the executable without arguments (e.g. double-click) opens the GUI. Starting it with `--config` / `--rules` runs the command-line interface.
+
+---
+
+# 3. Confidentiality
+
+This is a hard requirement.
+
+Email content must never leave the local machine. The only permitted network connection is to the IMAP server the user configured, to read mail.
+
+The application must not use:
+
+* cloud APIs
+* AI/LLM APIs (parsing is deterministic regex matching)
+* external parsing, OCR or email-processing services
+* telemetry, analytics or remote logging
+* cloud storage or automatic uploads
+
+Credentials:
+
+* The application never writes the IMAP password to disk. It is taken from the `MAILPROCESSOR_IMAP_PASSWORD` environment variable, an interactive prompt (CLI) or the password field (GUI, kept in memory only).
+* IMAP connections verify the server's TLS certificate. Plain connections must be upgraded via STARTTLS; the password is never sent unencrypted.
+
+Attachments are out of scope and are never processed or saved.
+
+---
+
+# 4. Workflow
+
+```text
+Mail source (.eml folder or IMAP mailbox)
+       ↓
+Optional pre-filter (IMAP sender filter, max age)
+       ↓
+Read message metadata and body locally
+       ↓
+Skip messages already processed (SQLite ledger)
+       ↓
+Extract configured fields
+       ↓
+Successful rows → data worksheet, failures → error worksheet
+       ↓
+Save workbook, then record processing state
+```
+
+A single run both processes and exports. There is no separate scan/export step.
+
+The application never modifies source emails. It must not delete, move, flag, mark as read, or otherwise change messages or files in the source.
+
+---
+
+# 5. Mail sources
+
+Every source converts messages into the application-owned model `NormalizedMail` as early as possible. No other layer may depend on source-specific objects (IMAP responses, file handles, and later Outlook COM objects).
+
+A source yields one item per message: either a `NormalizedMail`, or a `MailReadError` if that single message cannot be read. A source raises only for failures that affect the whole run (unreachable server, failed login, missing folder).
+
+### 5.1 `.eml` folder
+
+* Reads all files matching a glob (default `*.eml`) in one folder, in sorted order. Files are only opened for reading.
+* A missing folder is an error, not an empty result.
+* The workbook and the ledger must not be located inside the mail folder.
+
+### 5.2 IMAP
+
+* Strictly read-only. Allowed commands: `STARTTLS`, `LOGIN`, `EXAMINE`, `UID SEARCH`, `UID FETCH ... (BODY.PEEK[])`, `LOGOUT`. No `STORE`, `COPY`, `MOVE`, `EXPUNGE`, `CLOSE`, append or delete.
+* The server must confirm `[READ-ONLY]` for the mailbox; otherwise the run aborts before any message is fetched.
+* Fetches use `BODY.PEEK[]` so the `\Seen` flag is never set, even on servers that ignore read-only mode.
+* All server access goes through an allow-list wrapper (`ReadOnlyImapClient`) that exposes no mutating commands.
+* Optional server-side sender filter (`FROM`) and age filter (`SINCE`).
+
+### 5.3 Body extraction
+
+* The first `text/plain` part is used; if there is none, text is extracted from the first `text/html` part.
+* Unknown or invalid charsets fall back to UTF-8 instead of failing.
+* The body is normalized (line endings, trailing whitespace) before parsing.
+
+---
+
+# 6. Filtering
+
+Supported today:
+
+* **Sender** (IMAP only): server-side `FROM` filter.
+* **Age**: `max_age_days` / `--max-age-days`. Messages without a valid `Date` header are still processed rather than dropped silently.
+* **Volume**: `max_messages` limits how many *new* messages one run handles (already processed messages do not count).
+
+The application should comfortably handle thousands of emails.
+
+---
+
+# 7. Stable message identification
+
+Each message is identified by:
+
+```text
+(source_type, source_location, message_identity, content_hash)
+```
+
+* `message_identity` is the `Message-ID` header, or, if missing, a hash of date, sender, subject and body (same for all sources, independent of folder, mailbox or IMAP UID).
+* `content_hash` is the SHA-256 of the normalized body.
+* "Already processed" is decided by `message_identity` + `content_hash` only, so moving folders, moving the application, or renaming a mailbox never causes a second export.
+
+Do not identify messages by sender + subject or sender + timestamp + subject alone.
+
+---
+
+# 8. Parsing
+
+Extraction rules are configured in `parsing_rules.toml` as a list of fields:
+
+```toml
+[[fields]]
+column = "Kurs"
+pattern = "(?im)^\\s*Angebot:\\s*(.+?)\\s*$"
+required = true
+```
+
+* `pattern` is a Python regular expression, matched against the email text followed by the email's header lines (`Name: value`). Text comes first, so a label in the text wins over a header; headers are the fallback (e.g. the sender in `From:`). The first capture group is the value; without a group, the whole match is used. Whitespace in the value is collapsed.
+* The default rules extract all fields from `docs/example.eml`; `tests/test_default_rules.py` guards this.
+* Invalid patterns and duplicate column names are rejected when the rules are loaded.
+* A missing required field is a parsing error for that message. Missing values are never treated as valid.
+* Parsing is deterministic and independent of the mail source and of Excel.
+
+Prefer label-based patterns (`^Telefonnummer:\s*(.+)$`) over fragile positions.
+
+---
+
+# 9. Error handling
+
+A single malformed or unreadable email must never abort the batch:
+
+```text
+email 1 → success
+email 2 → success
+email 3 → parse error   (reported in the error worksheet)
+email 4 → success
+```
+
+Errors are visible to the user (error worksheet, run summary `seen/processed/skipped/failed`). Raw tracebacks are not shown in normal operation; details are available with `log_level = "DEBUG"`.
+
+---
+
+# 10. Processing state and idempotency
+
+SQLite stores the processing history (`sqlite_path`).
+
+* Repeated runs never create duplicate rows for successfully processed messages.
+* Failed messages are retried automatically on every run.
+* A message whose body changed is processed again (new `content_hash`).
+* The workbook is saved first; the ledger is committed only afterwards. A crash, or a workbook locked by Excel, therefore never leaves the ledger ahead of the workbook, and the run can simply be repeated.
+* `dry_run` / `--dry-run` parses and reports without writing the workbook or the ledger.
+
+---
+
+# 11. Excel output
+
+A single workbook (`output_xlsx`) is appended to across runs.
+
+* **Data worksheet** (default `daten`): one column per configured field, in rule order, followed by the fixed column `E-Mail-Inhalt` with the mail's full text (as extracted for parsing; truncated to Excel's limit of 32,767 characters per cell). The name `E-Mail-Inhalt` is reserved and cannot be used for a rule. Workbooks created before this column existed get the header added automatically; their old rows stay empty in that column.
+* Control characters that Excel cannot store are removed from all cell values.
+* **Error worksheet** (default `fehler`): `source_type`, `source_location`, `message_identity`, `missing_columns`, `error_reason`, `processed_at`. Exactly one row per currently failing message; the row is removed once the message succeeds.
+* Header row, frozen header and autofilter.
+* Values extracted from emails are always stored as text, never as formulas (email content is untrusted).
+* If an existing worksheet's header does not match the configured columns, the run stops with a clear message instead of writing misaligned rows.
+* The workbook is written atomically (temporary file, then replace). A workbook open in Excel is detected before processing starts.
+
+---
+
+# 12. Configuration
+
+`config.toml` holds the app settings (`sqlite_path`, `output_xlsx`, sheet names, `log_level`, `dry_run`, `max_messages`, `max_age_days`) and the source settings (`[source]`, `[source.eml]`, `[source.imap]`).
+
+Relative paths are resolved against the directory containing `config.toml`, so the shipped bundle works regardless of the working directory.
+
+The GUI edits `config.toml` and `parsing_rules.toml`, so normal users do not need to edit files by hand.
+
+---
+
+# 13. GUI
+
+Built with `tkinter`; intentionally small:
+
+* App settings and source settings (IMAP, or an `.eml` folder chosen with a folder picker; the file pattern is only configurable in `config.toml`)
+* Editor for parsing fields (add, update, remove, reorder)
+* Save, reload and run
+* Run summary and status line
+* German by default, English available
+
+The pipeline runs on a background thread so the window stays responsive.
+
+---
+
+# 14. Logging
+
+Python's standard logging. Logs stay local (currently written to the console/stderr).
+
+Never log:
+
+* email bodies
+* attachments
+* passwords or other credentials
+* extracted values
+
+---
+
+# 15. Testing
+
+Automated tests cover the business logic without requiring network access or a real mailbox. IMAP is tested with a fake client and, end-to-end, with the real `imaplib` against a scripted local IMAP server that asserts the mailbox is unchanged. A static test forbids mutating calls in `sources/`.
+
+* parser: valid and invalid messages, optional groups, whitespace, line endings
+* sources: `.eml` parsing, multipart and HTML bodies, unknown charsets, IMAP read-only behavior, filters, fetch and login failures
+* ledger: processed/failed/retry, rollback, read-only mode
+* Excel: headers, column order, formula-injection protection, header mismatch, error-row handling, locked workbook
+* pipeline/CLI: idempotency, dry run, `max_messages`, error isolation, script entry point
+
+Use only synthetic or anonymized emails. Never commit real email data.
+
+---
+
+# 16. Packaging and distribution
+
+* `scripts/build_executable.py` builds a one-file PyInstaller executable and a ZIP containing the executable, `config.toml`, `parsing_rules.toml`, an empty `mails/` folder, `README.md`, `RUNNING.md` and `LICENSE` (MIT).
+* GitHub Actions (`.github/workflows/ci.yml`) runs the tests on Linux, Windows and macOS for every push and pull request. For a pushed tag it then builds the Windows, macOS (Apple Silicon) and Linux ZIPs and creates a GitHub release with the three files attached. Releasing a version: set `version` in `pyproject.toml`, then `git tag -a X.Y -m "X.Y" && git push origin X.Y`.
+* The executables are not code-signed; the README explains the SmartScreen/Gatekeeper warnings.
+
+---
+
+# 17. Not yet implemented
+
+The following were part of the original Outlook-focused plan. They are not implemented; add them deliberately, following the rules above:
+
+* **Outlook desktop source** (Windows, `pywin32`/COM, existing Outlook profile, no credentials, read-only, `EntryID` as identity) implemented as another source that yields `NormalizedMail` / `MailReadError`.
+* Subject, date-range and unread filters.
+* Parser version tracking in the ledger, so that parser changes can deliberately trigger reprocessing.
+* Local log files with rotation.
+* Progress display (`Processing 137 / 317`) and cancellation in the GUI.
+* Excel column widths and date-typed columns.
+* Remembering GUI settings per user (e.g. under `%LOCALAPPDATA%`).

@@ -1,0 +1,28 @@
+# Relative paths are resolved against the directory containing this file.
+
+[app]
+log_level = "INFO" # DEBUG | INFO | WARNING | ERROR
+sqlite_path = "./data/ledger.db"
+output_xlsx = "./out/mail_export.xlsx"
+sheet_data = "daten"
+sheet_errors = "fehler"
+dry_run = false
+max_messages = 0 # max. new messages per run, 0 = unlimited
+max_age_days = 0 # 0 = unlimited
+
+[source]
+type = "eml" # "imap" | "eml"
+
+[source.eml]
+folder = "./mails"
+glob = "*.eml"
+
+[source.imap]
+host = "imap.example.com"
+port = 993
+username = "user@example.com"
+# No password here: set MAILPROCESSOR_IMAP_PASSWORD or enter it when prompted.
+mailbox = "INBOX"
+use_ssl = true # false = plain connection upgraded via STARTTLS (required)
+# Optional server-side filter: only messages with a matching From header are fetched
+# sender_filter = "schule@example.com"
