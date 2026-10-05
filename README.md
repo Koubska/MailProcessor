@@ -6,7 +6,7 @@ E-Mails werden nur gelesen, nie verändert. Alles läuft lokal, und jede E-Mail 
 ## Installation
 
 **Download:** ZIP-Datei für Ihr System von der
-[Releases-Seite](https://github.com/GITHUB-BENUTZER/mailprocessor/releases/latest) herunterladen, entpacken und
+[Releases-Seite](https://github.com/Koubska/MailProcessor/releases/latest) herunterladen, entpacken und
 `mailprocessor.exe` (Windows) bzw. `mailprocessor` doppelklicken. Das Programm ist nicht signiert:
 
 - **Windows:** **Weitere Informationen → Trotzdem ausführen** wählen.
