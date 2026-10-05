@@ -32,6 +32,8 @@ Das Programm hat vier Reiter, in dieser Reihenfolge einzurichten:
 
 1. **E-Mails:** wählen, woher die E-Mails kommen – aus einem **Ordner** mit gespeicherten `.eml`-Dateien
    oder **direkt aus dem Postfach** (IMAP; mit **Verbindung testen** prüfen, das Passwort wird nie gespeichert).
+   Unter **Welche E-Mails übertragen?** lässt sich festlegen, dass nur E-Mails mit einem bestimmten Betreff
+   (z. B. `Kontaktformular`) oder Absender übernommen werden; Newsletter & Co. landen dann nicht im Blatt **fehler**.
 2. **Felder:** eine Zeile pro Excel-Spalte. Unter **Art** wählen, wie der Wert gefunden wird, z. B.
    **Text nach Bezeichnung** mit der Bezeichnung `Telefonnummer:`. Rechts zeigt eine Beispiel-Mail sofort,
    was gefunden wird. Die Standardregeln passen zu [docs/example.eml](docs/example.eml).

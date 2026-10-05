@@ -194,10 +194,14 @@ def render_config_text(config: AppConfig) -> str:
                 # The password is intentionally never written to disk.
                 f"mailbox = {_toml_escape(source.imap.mailbox)}",
                 f"use_ssl = {'true' if source.imap.use_ssl else 'false'}",
+                "",
             ]
         )
-        if source.imap.sender_filter:
-            lines.append(f"sender_filter = {_toml_escape(source.imap.sender_filter)}")
+    if config.filter.active:
+        lines.append("[filter]")
+        for key, entries in (("subject", config.filter.subject), ("sender", config.filter.sender)):
+            if entries:
+                lines.append(f"{key} = [{', '.join(_toml_escape(entry) for entry in entries)}]")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -222,15 +226,17 @@ def run_summary_text(summary: RunSummary, output_name: str, error_sheet: str, dr
                 new=summary.processed + summary.failed, ok=summary.processed, failed=summary.failed
             )
         )
-        return " ".join(parts)
-    if summary.processed:
-        parts.append(t("summary.processed", lang).format(count=summary.processed, file=output_name))
-    if summary.failed:
-        parts.append(t("summary.failed", lang).format(count=summary.failed, sheet=error_sheet))
-    if not summary.processed and not summary.failed:
-        parts.append(t("summary.nothing_new", lang))
-    if summary.skipped:
-        parts.append(t("summary.skipped", lang).format(count=summary.skipped))
+    else:
+        if summary.processed:
+            parts.append(t("summary.processed", lang).format(count=summary.processed, file=output_name))
+        if summary.failed:
+            parts.append(t("summary.failed", lang).format(count=summary.failed, sheet=error_sheet))
+        if not summary.processed and not summary.failed:
+            parts.append(t("summary.nothing_new", lang))
+        if summary.skipped:
+            parts.append(t("summary.skipped", lang).format(count=summary.skipped))
+    if summary.filtered:
+        parts.append(t("summary.filtered", lang).format(count=summary.filtered))
     return " ".join(parts)
 
 

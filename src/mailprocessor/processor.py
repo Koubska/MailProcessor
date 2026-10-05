@@ -57,6 +57,8 @@ class RunSummary:
     failed: int
     # True if the run was stopped early; everything handled until then was saved.
     cancelled: bool = False
+    # Mails left out because subject or sender did not match the filter; not counted in `seen`.
+    filtered: int = 0
     problems: tuple[Problem, ...] = ()
 
 
@@ -109,9 +111,13 @@ def iter_source_messages(
 
     if app_cfg.source.type == "imap":
         assert app_cfg.source.imap is not None
-        # IMAP filters by age on the server (SEARCH SINCE).
+        # IMAP filters by age and, where it can, by subject and sender on the server (SEARCH SINCE/SUBJECT/FROM).
         for message in iter_imap_messages(
-            app_cfg.source.imap, max_age_days=max_age_days, now_utc=effective_now_utc, on_total=set_total
+            app_cfg.source.imap,
+            max_age_days=max_age_days,
+            now_utc=effective_now_utc,
+            on_total=set_total,
+            mail_filter=app_cfg.filter,
         ):
             advance()
             yield message
@@ -200,7 +206,7 @@ def run_pipeline(
     if not dry_run:
         excel.check_writable()
 
-    seen = processed = skipped = failed = 0
+    seen = processed = skipped = failed = filtered = 0
     problems: list[Problem] = []
     cancelled = False
     max_messages = app_cfg.app.max_messages
@@ -223,6 +229,14 @@ def run_pipeline(
                 logger.info("Stopped by the user; saving what was processed so far")
                 break
             is_mail = isinstance(item, NormalizedMail)
+            # Checked before the ledger, so changing the filter later picks these mails up.
+            if is_mail and not app_cfg.filter.matches(subject=item.subject, sender=item.from_raw):
+                logger.debug("Left out %s: subject or sender does not match the filter", item.display_name)
+                filtered += 1
+                if not dry_run:
+                    # It may have failed before the filter was set; it is no longer a problem.
+                    excel.remove_errors_for(error_key(item.source_type, item.source_location, item.message_identity))
+                continue
             key = LedgerKey(
                 source_type=item.source_type,
                 source_location=item.source_location,
@@ -283,7 +297,14 @@ def run_pipeline(
         else:
             logger.info("Dry run: %s and the ledger were not changed", excel.path)
 
-    logger.info("Run finished: seen=%d processed=%d skipped=%d failed=%d", seen, processed, skipped, failed)
+    logger.info(
+        "Run finished: seen=%d processed=%d skipped=%d failed=%d filtered=%d",
+        seen,
+        processed,
+        skipped,
+        failed,
+        filtered,
+    )
     if failed:
         logger.warning("%d message(s) failed; details are in the '%s' sheet", failed, app_cfg.app.sheet_errors)
 
@@ -293,6 +314,7 @@ def run_pipeline(
         skipped=skipped,
         failed=failed,
         cancelled=cancelled,
+        filtered=filtered,
         problems=tuple(problems),
     )
 

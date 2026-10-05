@@ -430,14 +430,8 @@ class App:
             ("imap_username", "mails.imap.username", "mails.imap.username_hint"),
             (None, "mails.imap.password", "mails.imap.password_hint"),
             ("imap_mailbox", "mails.imap.mailbox", "mails.imap.mailbox_hint"),
-            ("imap_sender_filter", "mails.imap.sender_filter", "mails.imap.sender_filter_hint"),
         )
-        for key, default in (
-            ("imap_host", ""),
-            ("imap_username", ""),
-            ("imap_mailbox", "INBOX"),
-            ("imap_sender_filter", ""),
-        ):
+        for key, default in (("imap_host", ""), ("imap_username", ""), ("imap_mailbox", "INBOX")):
             self.var(key, default)
         self.var("imap_port", "993")
         self.var("imap_use_ssl", True)
@@ -472,6 +466,25 @@ class App:
         self.connection_result.pack(side=tk.LEFT, padx=(12, 0))
         self.imap_frame.columnconfigure(1, weight=1)
         self.password.trace_add("write", lambda *_args: self.refresh_cards())
+        self._build_filter_section(tab)
+
+    def _build_filter_section(self, tab: ttk.Frame) -> None:
+        """Which mails count, for both sources: others are left out instead of landing on the error sheet."""
+        self.label(tab, "mails.filter.title", style="Heading.TLabel").pack(anchor="w", pady=(16, 0))
+        self.hint(tab, "mails.filter.hint", wrap=760).pack(anchor="w", pady=(2, 4))
+        frame = ttk.Frame(tab, padding=(28, 0, 0, 0))
+        frame.pack(fill=tk.X)
+        for row, (key, label_key, hint_key) in enumerate(
+            (
+                ("filter_subject", "mails.filter.subject", "mails.filter.subject_hint"),
+                ("filter_sender", "mails.filter.sender", "mails.filter.sender_hint"),
+            )
+        ):
+            self.var(key, "")
+            self.label(frame, label_key).grid(row=row, column=0, sticky="w", padx=(0, 12), pady=(4, 0))
+            self.entry(frame, key).grid(row=row, column=1, sticky="ew", pady=(4, 0))
+            self.hint(frame, hint_key, wrap=440).grid(row=row, column=2, sticky="w", padx=(12, 0), pady=(4, 0))
+        frame.columnconfigure(1, weight=1)
 
     # --- Felder
 
