@@ -37,11 +37,11 @@ The app icon lives in `src/mailprocessor/assets/` (`icon.png` for the Tk window,
 ```bash
 git fetch origin && git switch -c fix/short-topic origin/main   # one branch per topic
 # ... change, then: uv run pytest -q && uv run ruff check src tests scripts
-git commit ...                                                 # the user pushes and opens the PR:
-git push -u origin fix/short-topic && gh pr create --fill
+git commit ...
+git push -u origin fix/short-topic && gh pr create             # push the branch and open the PR
 ```
 
-After a merge: `git switch main && git pull --ff-only`, and delete the local branch.
+Claude may push branches and open pull requests; the user reviews and merges them. Never merge, never push `main` or tags. After a merge: `git switch main && git pull --ff-only`, and delete the local branch.
 
 ## Architecture
 
