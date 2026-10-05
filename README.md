@@ -37,6 +37,9 @@ Das Programm hat vier Reiter, in dieser Reihenfolge einzurichten:
 2. **Felder:** eine Zeile pro Excel-Spalte. Unter **Art** wählen, wie der Wert gefunden wird, z. B.
    **Text nach Bezeichnung** mit der Bezeichnung `Telefonnummer:`. Rechts zeigt eine Beispiel-Mail sofort,
    was gefunden wird. Die Standardregeln passen zu [docs/example.eml](docs/example.eml).
+   Kommen verschiedene Arten von E-Mails an (z. B. Anmeldung und Abmeldung), oben unter **Profil** für jede
+   Art ein eigenes Profil mit eigenen Feldern anlegen. Jede E-Mail wird mit allen Profilen geprüft und mit
+   dem übernommen, das alle Pflichtfelder und die meisten Felder findet.
 3. **Start:** zeigt, ob alles bereit ist. **Jetzt übertragen** klicken; **Testlauf** zeigt vorher, was
    passieren würde, ohne etwas zu speichern. **Excel öffnen** öffnet das Ergebnis. E-Mails mit Problemen
    erscheinen darunter; ein Doppelklick zeigt im Reiter **Felder**, welches Feld nicht gefunden wurde.
@@ -49,6 +52,9 @@ Die Ergebnisse landen in `out/mail_export.xlsx`: Das Blatt **daten** enthält ei
 Feldern, **Eingegangen am**, **Übertragen am** und dem vollständigen **E-Mail-Inhalt**. Das Blatt **fehler**
 listet E-Mails, die nicht verarbeitet werden konnten, mit Datei, Absender, Betreff und Grund. Einfach erneut
 übertragen, wenn neue E-Mails eingehen; nur neue werden hinzugefügt.
+
+Bei mehreren Profilen stehen alle Zeilen im Blatt **daten** mit einer Spalte **Profil**; unter
+**Einstellungen → Mehrere Profile** lässt sich stattdessen ein eigenes Blatt pro Profil wählen.
 
 Eigene Spalten (z. B. „Bestätigt“) und Notizen in der Excel-Datei bleiben erhalten. Neue Felder bekommen eine
 neue Spalte am Ende.

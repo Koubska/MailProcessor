@@ -10,9 +10,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from mailprocessor.config import FieldRule
+from mailprocessor.config import FieldRule, ParsingRules
 from mailprocessor.i18n import t
-from mailprocessor.parser import extract_field, normalize_body
+from mailprocessor.parser import ParseResult, extract_field, normalize_body, parse_mail
 from mailprocessor.sources.email_content import parse_message_bytes
 
 
@@ -81,6 +81,22 @@ def summary_text(rules: list[FieldRule], previews: list[RulePreview], error_shee
     if missing_optional:
         return t("preview.summary.ok_optional_missing", lang).format(columns=_quoted_list(missing_optional, lang))
     return t("preview.summary.ok", lang).format(count=len(rules))
+
+
+def best_profile(rules: ParsingRules, sample: SampleMail) -> ParseResult:
+    """The profile a run would choose for the sample mail (see `parser.best_result`)."""
+    return parse_mail(sample.body, rules, sample.header_text)
+
+
+def profile_summary_text(best: ParseResult, error_sheet: str, lang: str) -> str:
+    """With several profiles: which one the sample mail fits, or which one comes closest and what it misses."""
+    quote = ("„", "“") if lang == "de" else ("“", "”")
+    profile = f"{quote[0]}{best.profile}{quote[1]}"
+    if best.missing_required:
+        return t("preview.summary.no_profile", lang).format(
+            profile=profile, columns=_quoted_list(best.missing_required, lang), sheet=error_sheet
+        )
+    return t("preview.summary.profile", lang).format(profile=profile, count=len(best.values))
 
 
 def result_text(preview: RulePreview | None, lang: str) -> str:

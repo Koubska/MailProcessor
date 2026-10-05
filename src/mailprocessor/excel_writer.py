@@ -8,7 +8,7 @@ removed or reordered without breaking an existing workbook. The workbook is in G
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +26,8 @@ RECEIVED_COLUMN = "Eingegangen am"  # the mail's Date header
 TRANSFERRED_COLUMN = "Übertragen am"  # when the run added the row
 CONTENT_COLUMN = "E-Mail-Inhalt"  # the full mail text
 FIXED_DATA_COLUMNS = (RECEIVED_COLUMN, TRANSFERRED_COLUMN, CONTENT_COLUMN)
+# First column of the shared data sheet when there are several profiles: which profile the row was read with.
+PROFILE_COLUMN = "Profil"
 
 # The error sheet: one row per mail that currently fails. "Kennung" identifies the mail across runs; it is hidden.
 KEY_COLUMN = "Kennung"
@@ -195,15 +197,15 @@ def _locked_message(path: Path) -> str:
 class ExcelOutput:
     """In-memory workbook that is written to disk once, atomically, via `save()`.
 
-    `now` is the time of the run: "Übertragen am" in the data sheet and "Geprüft am" in the error sheet.
+    `data_sheets` maps each data sheet to its field columns (one sheet, or one per profile).
+    `now` is the time of the run: "Übertragen am" in the data sheets and "Geprüft am" in the error sheet.
     """
 
     def __init__(
         self,
         path: Path,
-        data_sheet: str,
+        data_sheets: Mapping[str, Sequence[str]],
         error_sheet: str,
-        data_columns: list[str],
         now: datetime | None = None,
     ) -> None:
         self.path = path
@@ -212,16 +214,18 @@ class ExcelOutput:
 
         if self.is_new:
             self.workbook = Workbook()
-            self.workbook.active.title = data_sheet
+            self.workbook.active.title = next(iter(data_sheets))
         else:
             self.workbook = load_workbook(path)
-        for name in (data_sheet, error_sheet):
+        for name in (*data_sheets, error_sheet):
             if name not in self.workbook.sheetnames:
                 self.workbook.create_sheet(name)
         errors = self.workbook[error_sheet]
         if [cell.value for cell in errors[1]] == LEGACY_ERROR_COLUMNS:
             _convert_legacy_error_sheet(errors)
-        self.data = _Sheet(self.workbook[data_sheet], [*data_columns, *FIXED_DATA_COLUMNS])
+        self.data = {
+            name: _Sheet(self.workbook[name], [*columns, *FIXED_DATA_COLUMNS]) for name, columns in data_sheets.items()
+        }
         self.errors = _Sheet(errors, ERROR_COLUMNS)
 
     def check_writable(self) -> None:
@@ -234,8 +238,12 @@ class ExcelOutput:
         except PermissionError:
             raise WorkbookLockedError(_locked_message(self.path)) from None
 
-    def append_data(self, values: dict[str, str], content: str, received: datetime | None = None) -> None:
-        self.data.append({**values, RECEIVED_COLUMN: received, TRANSFERRED_COLUMN: self.now, CONTENT_COLUMN: content})
+    def append_data(
+        self, values: dict[str, str], content: str, received: datetime | None = None, sheet: str | None = None
+    ) -> None:
+        """Add one row; `sheet` defaults to the first data sheet."""
+        target = self.data[sheet] if sheet is not None else next(iter(self.data.values()))
+        target.append({**values, RECEIVED_COLUMN: received, TRANSFERRED_COLUMN: self.now, CONTENT_COLUMN: content})
 
     def remove_errors_for(self, key: str) -> None:
         self.errors.delete_rows_where(KEY_COLUMN, key)
@@ -257,10 +265,13 @@ class ExcelOutput:
         )
 
     def save(self) -> None:
-        data_widths = {self.data.letter(name): DATE_COLUMN_WIDTH for name in (RECEIVED_COLUMN, TRANSFERRED_COLUMN)}
-        data_widths[self.data.letter(CONTENT_COLUMN)] = CONTENT_COLUMN_WIDTH
+        formats = []
+        for data in self.data.values():
+            widths = {data.letter(name): DATE_COLUMN_WIDTH for name in (RECEIVED_COLUMN, TRANSFERRED_COLUMN)}
+            widths[data.letter(CONTENT_COLUMN)] = CONTENT_COLUMN_WIDTH
+            formats.append((data, widths))
         error_widths = {self.errors.letter(name): DATE_COLUMN_WIDTH for name in ("Eingegangen am", "Geprüft am")}
-        for sheet, widths in ((self.data, data_widths), (self.errors, error_widths)):
+        for sheet, widths in (*formats, (self.errors, error_widths)):
             sheet.sheet.freeze_panes = "A2"
             sheet.sheet.auto_filter.ref = sheet.sheet.dimensions
             _format_sheet(sheet.sheet, widths)

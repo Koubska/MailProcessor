@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from mailprocessor.excel_writer import FIXED_DATA_COLUMNS
+from mailprocessor.excel_writer import FIXED_DATA_COLUMNS, PROFILE_COLUMN
 from mailprocessor.rule_patterns import LABEL_TYPES, RuleType, build_pattern
 
 
@@ -24,6 +24,9 @@ class AppSection(BaseModel):
     dry_run: bool = False
     max_messages: int = Field(default=0, ge=0)
     max_age_days: int = Field(default=0, ge=0)
+    # Where the rows of several profiles go: "shared" = all in sheet_data with a "Profil" column,
+    # "per_profile" = one sheet per profile, named like the profile.
+    profile_sheets: Literal["shared", "per_profile"] = "shared"
 
     @model_validator(mode="after")
     def validate_sheet_names(self) -> AppSection:
@@ -163,19 +166,77 @@ class FieldRule(BaseModel):
         return build_pattern(self.type, labels=self.label, start=self.start, end=self.end, pattern=self.pattern)
 
 
-class ParsingRules(BaseModel):
+# The name of the single profile in a rules file that only has [[fields]] (written before profiles existed).
+DEFAULT_PROFILE_NAME = "Standard"
+# Profile names can become sheet names, so they follow Excel's rules for those.
+SHEET_NAME_MAX_LENGTH = 31
+SHEET_NAME_FORBIDDEN = "[]:*?/\\"
+
+
+def profile_name_problem(name: str) -> str | None:
+    """Why `name` cannot be a profile (and sheet) name, or None if it can."""
+    if not name.strip():
+        return "a profile name is required"
+    if name != name.strip():
+        return f"profile name '{name}' must not start or end with spaces"
+    if len(name) > SHEET_NAME_MAX_LENGTH:
+        return f"profile name '{name}' is longer than {SHEET_NAME_MAX_LENGTH} characters"
+    forbidden = sorted({char for char in name if char in SHEET_NAME_FORBIDDEN})
+    if forbidden:
+        return f"profile name '{name}' must not contain {' '.join(forbidden)}"
+    if name.startswith("'") or name.endswith("'"):
+        return f"profile name '{name}' must not start or end with an apostrophe"
+    return None
+
+
+class Profile(BaseModel):
+    """One kind of mail (e.g. a registration form): its own fields. Each mail is assigned to the best-fitting one."""
+
+    name: str
     fields: list[FieldRule] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_unique_columns(self) -> ParsingRules:
+    def validate_profile(self) -> Profile:
+        problem = profile_name_problem(self.name)
+        if problem:
+            raise ValueError(problem[0].upper() + problem[1:])
         columns = [field.column for field in self.fields]
         duplicates = sorted({column for column in columns if columns.count(column) > 1})
         if duplicates:
             raise ValueError(f"Duplicate parsing column names are not allowed: {', '.join(duplicates)}")
-        for reserved in FIXED_DATA_COLUMNS:
+        for reserved in (*FIXED_DATA_COLUMNS, PROFILE_COLUMN):
             if reserved in columns:
                 raise ValueError(f"The column name '{reserved}' is reserved: the app fills that column itself")
         return self
+
+
+class ParsingRules(BaseModel):
+    profiles: list[Profile] = Field(min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def fields_as_single_profile(cls, data: object) -> object:
+        """A file with only [[fields]] (written before profiles existed) is one profile."""
+        if isinstance(data, dict) and "fields" in data:
+            if "profiles" in data:
+                raise ValueError("Use either [[fields]] or [[profiles]], not both")
+            rest = {key: value for key, value in data.items() if key != "fields"}
+            return {**rest, "profiles": [{"name": DEFAULT_PROFILE_NAME, "fields": data["fields"]}]}
+        return data
+
+    @model_validator(mode="after")
+    def validate_unique_names(self) -> ParsingRules:
+        # Case-insensitive, like Excel's sheet names.
+        names = [profile.name.casefold() for profile in self.profiles]
+        duplicates = sorted({profile.name for profile in self.profiles if names.count(profile.name.casefold()) > 1})
+        if duplicates:
+            raise ValueError(f"Duplicate profile names are not allowed: {', '.join(duplicates)}")
+        return self
+
+    @property
+    def columns(self) -> list[str]:
+        """All field columns of all profiles, each once, in the order they first appear."""
+        return list(dict.fromkeys(field.column for profile in self.profiles for field in profile.fields))
 
 
 DEFAULT_FILES = resources.files("mailprocessor") / "defaults"

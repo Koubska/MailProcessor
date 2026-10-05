@@ -22,6 +22,7 @@ from mailprocessor.config import (
     FieldRule,
     ImapSourceConfig,
     ParsingRules,
+    Profile,
     SourceConfig,
 )
 from mailprocessor.errors import (
@@ -59,9 +60,11 @@ def _read_text_or_empty(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def parse_rules_text(text: str) -> list[FieldRule]:
-    raw = tomllib.loads(text) if text.strip() else {"fields": []}
-    return ParsingRules.model_validate(raw).fields
+def parse_rules_text(text: str) -> list[Profile]:
+    """The profiles of a rules file; a file with only [[fields]] is one profile."""
+    if not text.strip():
+        return []
+    return ParsingRules.model_validate(tomllib.loads(text)).profiles
 
 
 def split_labels(text: str) -> list[str]:
@@ -137,11 +140,20 @@ def _toml_escape(value: str) -> str:
     return json.dumps(value, ensure_ascii=False).replace("\x7f", "\\u007F")
 
 
-def render_rules_text(fields: list[FieldRule]) -> str:
-    """Write only the inputs that belong to each rule's type; regex rules keep the original format."""
+def render_rules_text(profiles: list[Profile]) -> str:
+    """Write each profile with its fields; only the inputs that belong to each rule's type."""
+    lines: list[str] = []
+    for profile in profiles:
+        lines.extend(["[[profiles]]", f"name = {_toml_escape(profile.name)}", ""])
+        lines.extend(_render_fields(profile.fields))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_fields(fields: list[FieldRule]) -> list[str]:
+    """Regex rules keep the original format (no type line)."""
     lines: list[str] = []
     for field in fields:
-        lines.extend(["[[fields]]", f"column = {_toml_escape(field.column)}"])
+        lines.extend(["[[profiles.fields]]", f"column = {_toml_escape(field.column)}"])
         if field.type != "regex":
             lines.append(f"type = {_toml_escape(field.type)}")
         if field.type in LABEL_TYPES and field.label:
@@ -154,7 +166,7 @@ def render_rules_text(fields: list[FieldRule]) -> str:
         if field.type == "regex":
             lines.append(f"pattern = {_toml_escape(field.pattern or '')}")
         lines.extend([f"required = {'true' if field.required else 'false'}", ""])
-    return "\n".join(lines).rstrip() + "\n"
+    return lines
 
 
 def render_config_text(config: AppConfig) -> str:
@@ -167,6 +179,7 @@ def render_config_text(config: AppConfig) -> str:
         f"output_xlsx = {_toml_escape(app.output_xlsx)}",
         f"sheet_data = {_toml_escape(app.sheet_data)}",
         f"sheet_errors = {_toml_escape(app.sheet_errors)}",
+        f"profile_sheets = {_toml_escape(app.profile_sheets)}",
         f"dry_run = {'true' if app.dry_run else 'false'}",
         f"max_messages = {app.max_messages}",
         f"max_age_days = {app.max_age_days}",
@@ -229,6 +242,9 @@ def run_summary_text(summary: RunSummary, output_name: str, error_sheet: str, dr
     else:
         if summary.processed:
             parts.append(t("summary.processed", lang).format(count=summary.processed, file=output_name))
+            counts = [f"{name}: {count}" for name, count in summary.per_profile if count]
+            if counts:
+                parts[-1] = parts[-1].removesuffix(".") + f" ({', '.join(counts)})."
         if summary.failed:
             parts.append(t("summary.failed", lang).format(count=summary.failed, sheet=error_sheet))
         if not summary.processed and not summary.failed:
