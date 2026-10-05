@@ -1,6 +1,7 @@
 # Tests and lint on every push and pull request. On a pushed tag, additionally builds the
 # Windows, macOS (Apple Silicon) and Linux executables, attests their origin and publishes a GitHub release.
 # Dependabot pull requests are built too and merged automatically when they are small and everything passed.
+# Any pull request with the label "build" also builds the executables (no release), to test build changes.
 # Dependencies come from uv.lock, so every build uses exactly the tested versions.
 name: CI
 
@@ -9,6 +10,8 @@ on:
     branches: [main]
     tags: ["*"]
   pull_request:
+    # "labeled": adding the "build" label starts a test build of the executables.
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
@@ -47,9 +50,18 @@ jobs:
 
   build:
     name: Build
-    # Dependabot PRs are built too, so an update that breaks the executables is never merged.
-    if: startsWith(github.ref, 'refs/tags/') || github.event.pull_request.user.login == 'dependabot[bot]'
+    # Dependabot PRs are built too, so an update that breaks the executables is never merged;
+    # other PRs only with the label "build".
+    if: >-
+      startsWith(github.ref, 'refs/tags/') ||
+      github.event.pull_request.user.login == 'dependabot[bot]' ||
+      contains(github.event.pull_request.labels.*.name, 'build')
     needs: [test, lint]
+    defaults:
+      run:
+        # The same shell on every runner; Windows would otherwise run PowerShell, which reads
+        # bash syntax such as ${VERSION#v} differently.
+        shell: bash
     permissions:
       contents: read
       id-token: write # sign the build provenance
@@ -71,9 +83,11 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --locked --group build
-      - name: Use the tag as the version (releases only; tag "v3.4" or "3.4")
-        if: startsWith(github.ref, 'refs/tags/')
-        run: uv version "${GITHUB_REF_NAME#v}" --frozen
+      # Runs in every build (not only for tags), so a problem here shows up before a release.
+      - name: Set the version (the tag, e.g. "3.5" or "v3.5"; a placeholder outside releases)
+        env:
+          VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '0.0.0.dev0' }}
+        run: uv version "${VERSION#v}" --frozen
       - run: uv run --no-sync python scripts/build_executable.py --target-platform ${{ matrix.platform }}
       - uses: actions/upload-artifact@v7
         with:
