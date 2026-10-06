@@ -71,9 +71,14 @@ def _text(values: FormValues, key: str) -> str:
     return str(values.get(key, "")).strip()
 
 
+def _is_number(text: str) -> bool:
+    """Only 0-9: str.isdigit also accepts "²" (AltGr+2 on German keyboards), which int() rejects."""
+    return text.isascii() and text.isdigit()
+
+
 def _count(values: FormValues, key: str, errors: dict[str, str], lang: str) -> int:
     raw = _text(values, key) or "0"
-    if not raw.isdigit():
+    if not _is_number(raw):
         errors[key] = t("error.form.number", lang)
         return 0
     return int(raw)
@@ -92,7 +97,7 @@ def config_from_form(values: FormValues, lang: str) -> tuple[AppConfig | None, d
     if use_imap and not _text(values, "imap_username"):
         errors["imap_username"] = t("error.form.username_empty", lang)
     port_text = _text(values, "imap_port") or DEFAULT_IMAP_PORTS[bool(values.get("imap_use_ssl", True))]
-    port = int(port_text) if port_text.isdigit() and 0 < int(port_text) < 65536 else None
+    port = int(port_text) if _is_number(port_text) and 0 < int(port_text) < 65536 else None
     if port is None and use_imap:
         errors["imap_port"] = t("error.form.port", lang)
 
