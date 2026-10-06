@@ -244,6 +244,7 @@ class FieldEditor:
         """Result of the rule being edited, and what is still wrong with its inputs (e.g. a duplicate column)."""
         self.update_column_note()
         self.sample_text.tag_remove("match", "1.0", tk.END)
+        self.sample_header.tag_remove("match", "1.0", tk.END)
         self.editor_problem.configure(text="")
         inputs = {"between": ("start", "end"), "regex": ("pattern",)}.get(self.field_type, ("labels",))
         if self.field_type != "email" and not any(self.field_vars[name].get().strip() for name in inputs):
@@ -271,3 +272,7 @@ class FieldEditor:
             start, end = (f"1.0 + {offset} chars" for offset in preview.span)
             self.sample_text.tag_add("match", start, end)
             self.sample_text.see(start)
+        elif preview.header_span is not None:
+            start, end = (f"1.0 + {offset} chars" for offset in preview.header_span)
+            self.sample_header.tag_add("match", start, end)
+            self.sample_header.see(start)

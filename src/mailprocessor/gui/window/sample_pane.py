@@ -57,8 +57,20 @@ class SamplePane:
         self.sample_summary = ttk.Label(pane, wraplength=self.px(440), justify=tk.LEFT, font=self.bold_font)
         self.sample_summary.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
         self.hint(pane, "preview.header_note", wrap=440).pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+        # The header lines are shown read-only: a run searches them, but they are not part of the editable body.
+        self.sample_header_frame = ttk.Frame(pane)
+        self.label(self.sample_header_frame, "preview.headers", style="Hint.TLabel").pack(anchor="w")
+        header_box = ttk.Frame(self.sample_header_frame)
+        header_box.pack(fill=tk.X, pady=(2, 6))
+        self.sample_header = tk.Text(header_box, wrap="word", height=5, foreground=GRAY, state="disabled")
+        header_scroll = ttk.Scrollbar(header_box, orient=tk.VERTICAL, command=self.sample_header.yview)
+        self.sample_header.configure(yscrollcommand=header_scroll.set)
+        self.sample_header.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        header_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.sample_header.tag_configure("match", background=HIGHLIGHT, foreground="black")
         text_frame = ttk.Frame(pane)
         text_frame.pack(fill=tk.BOTH, expand=True)
+        self.sample_text_frame = text_frame
         self.sample_text = tk.Text(text_frame, wrap="word", height=12, undo=True)
         sample_scroll = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.sample_text.yview)
         self.sample_text.configure(yscrollcommand=sample_scroll.set)
@@ -88,8 +100,19 @@ class SamplePane:
         self.sample_text.delete("1.0", tk.END)
         self.sample_text.insert("1.0", sample.body)
         self.sample_text.edit_reset()
+        self.show_sample_header(sample.header_text)
         self.update_sample_title()
         self.schedule_preview()
+
+    def show_sample_header(self, header_text: str) -> None:
+        self.sample_header.configure(state="normal")
+        self.sample_header.delete("1.0", tk.END)
+        self.sample_header.insert("1.0", header_text)
+        self.sample_header.configure(state="disabled")
+        if header_text:
+            self.sample_header_frame.pack(fill=tk.X, before=self.sample_text_frame)
+        else:
+            self.sample_header_frame.pack_forget()
 
     def show_sample_file(self, path: Path, index: int = -1) -> None:
         try:

@@ -68,8 +68,9 @@ CATALOG: dict[str, dict[str, str]] = {
         "preview.no_sample_summary": (
             "Eine Beispiel-Mail laden oder den Text einer Mail einfügen, um die Regeln direkt zu testen."
         ),
+        "preview.headers": "Kopfzeilen der Mail (nur lesen)",
         "preview.header_note": (
-            "Die Kopfzeilen der Mail (z. B. From:) werden ebenfalls durchsucht. "
+            "Die Kopfzeilen der Mail (oben, z. B. From:) werden ebenfalls durchsucht. "
             "Änderungen am Text hier dienen nur dem Test und ändern keine Mail."
         ),
         "preview.editor.found": "In der Beispiel-Mail: ✓ {value}",
@@ -458,8 +459,9 @@ CATALOG: dict[str, dict[str, str]] = {
         "preview.pasted": "Pasted text",
         "preview.none": "No sample mail loaded",
         "preview.no_sample_summary": "Load a sample mail or paste the text of a mail to test the rules right away.",
+        "preview.headers": "Mail header lines (read-only)",
         "preview.header_note": (
-            "The mail's header lines (e.g. From:) are searched too. "
+            "The mail's header lines (above, e.g. From:) are searched too. "
             "Edits to the text here are only for testing and change no mail."
         ),
         "preview.editor.found": "In the sample mail: ✓ {value}",

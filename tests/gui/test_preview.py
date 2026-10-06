@@ -60,6 +60,23 @@ def test_value_from_a_header_has_no_span() -> None:
     assert preview.from_header
 
 
+def test_value_from_a_header_has_a_header_span() -> None:
+    sample = SampleMail(title="x", body="Hallo", header_text="Subject: Test\nFrom: eltern@example.org")
+    preview = preview_rule(FieldRule(column="M", type="email", label=["Von", "From"]), sample)
+
+    assert preview.header_span is not None
+    assert sample.header_text[preview.header_span[0] : preview.header_span[1]] == "eltern@example.org"
+
+
+def test_value_in_the_body_has_no_header_span() -> None:
+    sample = SampleMail(title="x", body="From: a@example.org", header_text="From: b@example.org")
+    preview = preview_rule(FieldRule(column="M", type="email", label=["From"]), sample)
+
+    assert preview.value == "a@example.org"
+    assert preview.span is not None
+    assert preview.header_span is None
+
+
 def test_not_found() -> None:
     preview = preview_rule(FieldRule(column="X", type="label", label="Gibt es nicht"), SampleMail("x", "Text"))
 
