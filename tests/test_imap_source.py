@@ -403,3 +403,21 @@ def test_examine_sends_the_encoded_mailbox_name() -> None:
     ReadOnlyImapClient(RecordingClient()).examine("Anfragen Schüler")
 
     assert selected == ['"Anfragen Sch&APw-ler"']
+
+
+def test_non_ascii_password_is_sent_as_utf8_plain_and_rejection_is_a_login_error() -> None:
+    sent: list[bytes] = []
+
+    class PlainRejectingClient(FakeImapClient):
+        def authenticate(self, mechanism: str, authobject):
+            assert mechanism == "PLAIN"
+            sent.append(authobject(b""))
+            raise imaplib.IMAP4.error("AUTHENTICATE failed")  # what imaplib raises for NO
+
+    fake_client = PlainRejectingClient()
+    config = _cfg(password="Schlüssel§")
+    with pytest.raises(OSError, match="login failed"):
+        check_imap_connection(config, client_factory=lambda _host, _port: fake_client)
+
+    assert sent == [f"\0{config.username}\0Schlüssel§".encode()]
+    assert fake_client.logout_called

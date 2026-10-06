@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 class ImapClient(Protocol):
     def login(self, user: str, password: str): ...
+    def authenticate(self, mechanism: str, authobject: Callable[[bytes], bytes]): ...
     def select(self, mailbox: str = "INBOX", readonly: bool = False): ...
     def uid(self, command: str, *args): ...
     def response(self, code: str): ...
@@ -43,7 +44,14 @@ class ReadOnlyImapClient:
         self._client = client
 
     def login(self, user: str, password: str):
-        return self._client.login(user, password)
+        """LOGIN for ASCII credentials; otherwise AUTHENTICATE PLAIN, which is defined as UTF-8 (RFC 4616).
+
+        imaplib sends LOGIN as ASCII, so a password with "ä", "§" or "€" would fail before reaching the server.
+        """
+        if user.isascii() and password.isascii():
+            return self._client.login(user, password)
+        credentials = f"\0{user}\0{password}".encode()
+        return self._client.authenticate("PLAIN", lambda _challenge: credentials)
 
     def examine(self, mailbox: str) -> int | None:
         """Open the mailbox with EXAMINE and require the server's [READ-ONLY] confirmation.
