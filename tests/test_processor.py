@@ -799,6 +799,30 @@ def test_profile_sheet_must_not_be_the_error_sheet(tmp_path: Path) -> None:
         run_pipeline(config, rules)
 
 
+def _error_rows(tmp_path: Path) -> list[tuple]:
+    return list(load_workbook(tmp_path / "out" / "mail_export.xlsx")["fehler"].iter_rows(min_row=2, values_only=True))
+
+
+def test_error_row_of_an_unreadable_file_goes_once_the_file_is_read(tmp_path: Path, monkeypatch) -> None:
+    # E.g. on Windows a file that is still being copied cannot be opened; the next run reads it fine.
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _write_eml(inbox / "a.eml", GOOD_BODY, "a@example.com")
+    config = _build_config(tmp_path)
+    read_bytes = Path.read_bytes
+
+    def still_copying(path: Path) -> bytes:
+        if path.name == "a.eml":
+            raise PermissionError("in use by another process")
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", still_copying)
+    assert run_pipeline(config, _build_rules()).failed == 1
+    assert len(_error_rows(tmp_path)) == 1
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+
+    assert run_pipeline(config, _build_rules()).processed == 1
+    assert _error_rows(tmp_path) == []
 def test_overlapping_runs_never_lose_rows(tmp_path: Path, monkeypatch) -> None:
     # Run B has loaded the workbook and waits for its mail source (e.g. a slow IMAP login) while run A
     # (a second window, or a scheduled CLI run) exports the mail. B must not save its older copy over A's rows.

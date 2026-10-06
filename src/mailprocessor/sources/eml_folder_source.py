@@ -13,8 +13,14 @@ from mailprocessor.sources.email_content import parse_message_bytes
 logger = logging.getLogger(__name__)
 
 
+def _read_error_identity(path: Path) -> str:
+    return f"file:{path.name}"
+
+
 def parse_eml_file(path: Path, source_location: str) -> NormalizedMail:
-    return parse_message_bytes(path.read_bytes(), "eml", source_location, origin=path.name)
+    return parse_message_bytes(
+        path.read_bytes(), "eml", source_location, origin=path.name, read_error_identity=_read_error_identity(path)
+    )
 
 
 def matching_files(folder: Path, glob_pattern: str = "*.eml") -> list[Path]:
@@ -45,7 +51,7 @@ def iter_eml_messages(
             yield MailReadError(
                 source_type="eml",
                 source_location=source_location,
-                message_identity=f"file:{eml_path.name}",
+                message_identity=_read_error_identity(eml_path),
                 reason=f"Could not read file ({type(exc).__name__}): {str(exc)[:200]}",
                 origin=eml_path.name,
             )

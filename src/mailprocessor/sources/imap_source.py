@@ -167,11 +167,15 @@ def _build_search_args(mail_filter: MailFilter, max_age_days: int, now_utc: date
     return tuple(search_args) if search_args else ("ALL",)
 
 
+def _read_error_identity(uid: bytes) -> str:
+    return f"uid:{uid.decode('ascii', errors='replace')}"
+
+
 def _read_error(source_location: str, uid: bytes, reason: str) -> MailReadError:
     return MailReadError(
         source_type="imap",
         source_location=source_location,
-        message_identity=f"uid:{uid.decode('ascii', errors='replace')}",
+        message_identity=_read_error_identity(uid),
         reason=reason,
         origin=f"IMAP uid {uid.decode('ascii', errors='replace')}",
     )
@@ -258,7 +262,11 @@ def iter_imap_messages(
                 continue
             try:
                 yield parse_message_bytes(
-                    raw_bytes, "imap", source_location, origin=f"IMAP uid {uid.decode('ascii', errors='replace')}"
+                    raw_bytes,
+                    "imap",
+                    source_location,
+                    origin=f"IMAP uid {uid.decode('ascii', errors='replace')}",
+                    read_error_identity=_read_error_identity(uid),
                 )
             except Exception as exc:  # one malformed message must not abort the batch
                 yield _read_error(source_location, uid, f"Could not parse message ({type(exc).__name__})")
