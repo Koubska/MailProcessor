@@ -23,6 +23,7 @@ from mailprocessor.excel_writer import (
     TRANSFERRED_COLUMN,
     ErrorEntry,
     ExcelOutput,
+    error_key,
 )
 
 DATA_COLUMNS = ["Mail-Adresse", "Name", "Kurs", "Zeit", "Telefonnummer"]
@@ -350,14 +351,14 @@ def test_old_english_error_sheet_is_converted(tmp_path: Path) -> None:
     assert rows[0]["E-Mail"] == "<a@example.com>"
     assert rows[0]["Fehlende Felder"] == "Telefonnummer"
     assert rows[0]["Grund"] == "Pflichtfelder nicht gefunden"
-    assert rows[0][KEY_COLUMN] == "eml|/mails|<a@example.com>"
+    assert rows[0][KEY_COLUMN] == error_key("eml", "/mails", "<a@example.com>")
     assert rows[1]["E-Mail"] == "kaputt.eml"
     assert rows[1]["Grund"] == "Could not read file (OSError): disk"
     assert isinstance(rows[0]["Geprüft am"], datetime)
 
     # The converted row is found again: the next failure of that mail replaces it.
     again = _output(path, ["Name"])
-    again.upsert_error(_error("eml|/mails|<a@example.com>"))
+    again.upsert_error(_error(error_key("eml", "/elsewhere", "<a@example.com>")))
     again.save()
     assert len(_rows(path, "fehler")) == 3
 
@@ -441,3 +442,20 @@ def test_save_keeps_a_width_set_for_several_columns_without_overlapping_ranges(t
     assert len(covered) == len(set(covered)), ranges
     assert (2, 4) in ranges
     assert load_workbook(path)["daten"].column_dimensions["B"].width == 33
+
+
+def test_error_rows_of_earlier_versions_are_found_without_the_location(tmp_path: Path) -> None:
+    # Earlier versions wrote "type|location|identity"; such a row must still be replaced, not duplicated.
+    path = tmp_path / "output.xlsx"
+    first = _output(path, DATA_COLUMNS)
+    first.upsert_error(_error("eml|/old/mails|<a@example.com>"))
+    first.upsert_error(_error("eml|/old/mails|<b@example.com>"))
+    first.save()
+
+    second = _output(path, DATA_COLUMNS)
+    second.upsert_error(_error(error_key("eml", "/new/mails", "<a@example.com>")))
+    second.remove_errors_for(error_key("imap", "imap://h:993/INBOX", "<b@example.com>"))  # other source type
+    second.save()
+
+    keys = sorted(row[-1] for row in _rows(path, "fehler")[1:])
+    assert keys == ["eml|/old/mails|<b@example.com>", "eml|<a@example.com>"]
