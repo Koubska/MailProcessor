@@ -606,6 +606,24 @@ def test_mail_without_date_is_still_transferred(tmp_path: Path) -> None:
     assert _data_rows(tmp_path)[0][RECEIVED_COLUMN] is None
 
 
+@pytest.mark.parametrize("max_age_days", [0, 30])
+def test_mail_with_a_date_out_of_range_does_not_abort_the_run(tmp_path: Path, max_age_days: int) -> None:
+    # In UTC this is the year 10000, which datetime cannot represent (OverflowError). One such mail,
+    # e.g. spam, must not stop every run; it is treated like a mail without a usable date.
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _write_eml_with_date(inbox / "a.eml", GOOD_BODY, "a@example.com", "Fri, 31 Dec 9999 23:59:59 -2359")
+    _write_eml(inbox / "b.eml", GOOD_BODY, "b@example.com")
+    config = _build_config(tmp_path)
+    config.app.max_age_days = max_age_days
+
+    summary = run_pipeline(config, _build_rules())
+
+    # Like a mail without a date: transferred (max_age_days cannot judge it), "Eingegangen am" stays empty.
+    assert (summary.processed, summary.failed) == (2, 0)
+    assert [row[RECEIVED_COLUMN] is None for row in _data_rows(tmp_path)] == [True, False]
+
+
 def test_error_sheet_names_file_sender_subject_and_missing_fields(tmp_path: Path) -> None:
     inbox = tmp_path / "inbox"
     inbox.mkdir()
