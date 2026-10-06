@@ -365,6 +365,10 @@ CATALOG: dict[str, dict[str, str]] = {
             "Die Excel-Datei ist gerade in einem anderen Programm geöffnet. "
             "Bitte Excel schließen und erneut auf „Jetzt übertragen“ klicken."
         ),
+        "error.run_in_progress": (
+            "Gerade läuft schon eine Übertragung, z. B. in einem zweiten Fenster oder als geplante Aufgabe. "
+            "Bitte warten, bis sie fertig ist, und dann erneut auf „Jetzt übertragen“ klicken."
+        ),
         "error.sheet_header": (
             "In einem Blatt der Excel-Datei fehlt die Überschriftenzeile (Zeile 1), daher lassen sich die "
             "Spalten nicht zuordnen. Bitte die Überschriften wiederherstellen oder unter „Einstellungen“ "
@@ -719,6 +723,10 @@ CATALOG: dict[str, dict[str, str]] = {
         "error.workbook_locked": (
             "The Excel file is open in another program. Close Excel and click “Transfer now” "
             "again."
+        ),
+        "error.run_in_progress": (
+            "A transfer is already running, e.g. in a second window or as a scheduled task. "
+            "Wait until it has finished, then click “Transfer now” again."
         ),
         "error.sheet_header": (
             "A sheet of the Excel file has no header row (row 1), so its columns cannot be matched. "

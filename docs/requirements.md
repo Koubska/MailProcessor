@@ -203,6 +203,7 @@ SQLite stores the processing history (`sqlite_path`).
 * Failed messages are retried automatically on every run.
 * A message whose body changed is processed again (new `content_hash`).
 * The workbook is saved first; the ledger is committed only afterwards. A crash, or a workbook locked by Excel, therefore never leaves the ledger ahead of the workbook, and the run can simply be repeated.
+* Only one run writes at a time. A second run started meanwhile (a second window, a scheduled CLI run) stops right away with a message, before it reads the workbook; otherwise it could save its older copy over the first run's new rows, which the ledger would then never export again. Dry runs write nothing and are not limited.
 * `dry_run` / `--dry-run` parses and reports without writing the workbook or the ledger.
 * A run can be stopped (GUI "Stopp"). It stops before the next message and saves everything handled until then, so the next run continues there.
 * "Alles neu exportieren" (GUI, advanced settings) renames the current workbook to `<name>_backup_<date>_<time>.xlsx`, clears the ledger and starts a run, so every message is exported again into a fresh workbook. The workbook is moved first; if it is locked by Excel, nothing changes.
