@@ -16,7 +16,7 @@ from pathlib import Path
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Font
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from mailprocessor.errors import SheetHeaderError, WorkbookLockedError, WorkbookUnreadableError
@@ -177,10 +177,16 @@ def _format_sheet(sheet: Worksheet, fixed_widths: dict[str, float]) -> None:
     (from an earlier run or set by the user in Excel) keep it."""
     for cell in sheet[1]:
         cell.font = HEADER_FONT
+    # Excel stores one width for several columns as a range (e.g. B:D under "B"); a width added for a
+    # column inside it would overlap, and Excel reports overlapping ranges as a damaged file.
+    has_width: set[int] = set()
+    for letter, dimension in sheet.column_dimensions.items():
+        first = dimension.min or column_index_from_string(letter)
+        has_width.update(range(first, max(dimension.max or first, first) + 1))
     sample_end = min(sheet.max_row, _WIDTH_SAMPLE_ROWS)
     for index, cells in enumerate(sheet.iter_cols(max_row=sample_end, values_only=True), start=1):
         letter = get_column_letter(index)
-        if letter in sheet.column_dimensions:
+        if index in has_width:
             continue
         width = fixed_widths.get(letter)
         if width is None:

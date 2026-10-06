@@ -1,8 +1,11 @@
+import re
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 from openpyxl import Workbook, load_workbook
+from openpyxl.worksheet.dimensions import ColumnDimension
 
 from mailprocessor.errors import SheetHeaderError, WorkbookUnreadableError
 from mailprocessor.excel_writer import (
@@ -410,3 +413,31 @@ def test_a_workbook_that_cannot_be_opened_is_reported_clearly(tmp_path: Path, co
     with pytest.raises(WorkbookUnreadableError, match="output.xlsx"):
         _output(path, DATA_COLUMNS)
     assert path.read_bytes() == content  # left as it is
+
+
+def _column_ranges(path: Path, sheet_index: int = 1) -> list[tuple[int, int]]:
+    xml = zipfile.ZipFile(path).read(f"xl/worksheets/sheet{sheet_index}.xml").decode()
+    return [(int(low), int(high)) for low, high in re.findall(r'<col [^>]*min="(\d+)" max="(\d+)"', xml)]
+
+
+def test_save_keeps_a_width_set_for_several_columns_without_overlapping_ranges(tmp_path: Path) -> None:
+    # Excel stores one width for several selected columns as one range (<col min="2" max="4">).
+    # Widths added on top for columns inside it make Excel report the file as damaged.
+    path = tmp_path / "output.xlsx"
+    _output(path, DATA_COLUMNS).save()
+    workbook = load_workbook(path)
+    sheet = workbook["daten"]
+    for letter in list(sheet.column_dimensions):
+        del sheet.column_dimensions[letter]
+    sheet.column_dimensions["B"] = ColumnDimension(sheet, index="B", min=2, max=4, width=33, customWidth=True)
+    workbook.save(path)
+
+    output = _output(path, DATA_COLUMNS)
+    output.append_data({"Name": "x" * 200, "Kurs": "y" * 200}, "Text")
+    output.save()
+
+    ranges = sorted(_column_ranges(path))
+    covered = [column for low, high in ranges for column in range(low, high + 1)]
+    assert len(covered) == len(set(covered)), ranges
+    assert (2, 4) in ranges
+    assert load_workbook(path)["daten"].column_dimensions["B"].width == 33
