@@ -14,6 +14,10 @@ class WorkbookLockedError(OSError):
     """The Excel file cannot be written, typically because it is open in Excel."""
 
 
+class WorkbookUnreadableError(ValueError):
+    """The output file exists but cannot be opened as a workbook: damaged, not .xlsx, or protected with a password."""
+
+
 class SheetHeaderError(ValueError):
     """A sheet the app writes to has data but no header row, so its columns cannot be found."""
 

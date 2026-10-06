@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook, load_workbook
 
-from mailprocessor.errors import SheetHeaderError
+from mailprocessor.errors import SheetHeaderError, WorkbookUnreadableError
 from mailprocessor.excel_writer import (
     CONTENT_COLUMN,
     CONTENT_COLUMN_WIDTH,
@@ -393,3 +393,20 @@ def test_save_keeps_column_widths_set_by_the_user(tmp_path: Path) -> None:
     output.save()
 
     assert load_workbook(path)["daten"].column_dimensions["B"].width == 33
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"",  # e.g. left behind by an interrupted copy
+        bytes.fromhex("D0CF11E0A1B11AE1") + bytes(504),  # how Excel stores a workbook protected with a password
+        b"Name;Kurs\n",  # a CSV file named .xlsx
+    ],
+)
+def test_a_workbook_that_cannot_be_opened_is_reported_clearly(tmp_path: Path, content: bytes) -> None:
+    path = tmp_path / "output.xlsx"
+    path.write_bytes(content)
+
+    with pytest.raises(WorkbookUnreadableError, match="output.xlsx"):
+        _output(path, DATA_COLUMNS)
+    assert path.read_bytes() == content  # left as it is

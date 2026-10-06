@@ -19,7 +19,7 @@ from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from mailprocessor.errors import SheetHeaderError, WorkbookLockedError
+from mailprocessor.errors import SheetHeaderError, WorkbookLockedError, WorkbookUnreadableError
 
 # Columns of the data sheet that the app fills itself, after the field columns (reserved names for fields).
 RECEIVED_COLUMN = "Eingegangen am"  # the mail's Date header
@@ -190,6 +190,18 @@ def _format_sheet(sheet: Worksheet, fixed_widths: dict[str, float]) -> None:
         sheet.column_dimensions[letter].width = width
 
 
+def _open_workbook(path: Path) -> Workbook:
+    try:
+        return load_workbook(path)
+    except OSError:
+        raise  # e.g. no permission; handled like any other file error
+    except Exception as exc:  # zipfile.BadZipFile, missing or broken parts inside the file, ...
+        raise WorkbookUnreadableError(
+            f"Cannot open {path} as an Excel workbook ({type(exc).__name__}). It may be damaged, not an .xlsx file, "
+            "or protected with a password. Remove the password, or choose another output file."
+        ) from None
+
+
 def _locked_message(path: Path) -> str:
     return f"Cannot write {path}. Is it open in Excel? Close it and run again."
 
@@ -216,7 +228,7 @@ class ExcelOutput:
             self.workbook = Workbook()
             self.workbook.active.title = next(iter(data_sheets))
         else:
-            self.workbook = load_workbook(path)
+            self.workbook = _open_workbook(path)
         for name in (*data_sheets, error_sheet):
             if name not in self.workbook.sheetnames:
                 self.workbook.create_sheet(name)

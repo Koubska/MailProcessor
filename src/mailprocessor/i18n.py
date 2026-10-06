@@ -365,6 +365,11 @@ CATALOG: dict[str, dict[str, str]] = {
             "Die Excel-Datei ist gerade in einem anderen Programm geöffnet. "
             "Bitte Excel schließen und erneut auf „Jetzt übertragen“ klicken."
         ),
+        "error.workbook_unreadable": (
+            "Die Excel-Datei lässt sich nicht öffnen: Sie ist beschädigt, keine .xlsx-Datei oder mit einem "
+            "Kennwort geschützt. Bitte das Kennwort in Excel entfernen oder unter „Einstellungen“ eine andere "
+            "Excel-Datei wählen."
+        ),
         "error.run_in_progress": (
             "Gerade läuft schon eine Übertragung, z. B. in einem zweiten Fenster oder als geplante Aufgabe. "
             "Bitte warten, bis sie fertig ist, und dann erneut auf „Jetzt übertragen“ klicken."
@@ -723,6 +728,10 @@ CATALOG: dict[str, dict[str, str]] = {
         "error.workbook_locked": (
             "The Excel file is open in another program. Close Excel and click “Transfer now” "
             "again."
+        ),
+        "error.workbook_unreadable": (
+            "The Excel file cannot be opened: it is damaged, not an .xlsx file, or protected with a password. "
+            "Remove the password in Excel or choose another Excel file under “Settings”."
         ),
         "error.run_in_progress": (
             "A transfer is already running, e.g. in a second window or as a scheduled task. "
