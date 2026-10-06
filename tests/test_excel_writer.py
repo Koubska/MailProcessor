@@ -459,3 +459,20 @@ def test_error_rows_of_earlier_versions_are_found_without_the_location(tmp_path:
 
     keys = sorted(row[-1] for row in _rows(path, "fehler")[1:])
     assert keys == ["eml|/old/mails|<b@example.com>", "eml|<a@example.com>"]
+
+
+def test_sheet_names_differing_only_in_case_reuse_the_existing_sheet(tmp_path: Path) -> None:
+    # Excel treats sheet names case-insensitively; e.g. a profile renamed from "anmeldung" to "Anmeldung",
+    # or the data sheet setting changed from "daten" to "Daten", must keep the rows already there.
+    path = tmp_path / "output.xlsx"
+    first = ExcelOutput(path, {"anmeldung": ["Name"]}, "fehler", now=RUN_AT)
+    first.append_data({"Name": "Anna"}, "Text")
+    first.save()
+
+    second = ExcelOutput(path, {"Anmeldung": ["Name"]}, "Fehler", now=RUN_AT)
+    second.append_data({"Name": "Ben"}, "Text", sheet="Anmeldung")
+    second.save()
+
+    workbook = load_workbook(path)
+    assert workbook.sheetnames == ["Anmeldung", "Fehler"]
+    assert [row[0] for row in workbook["Anmeldung"].iter_rows(values_only=True)] == ["Name", "Anna", "Ben"]

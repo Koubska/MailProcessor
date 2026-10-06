@@ -8,6 +8,7 @@ removed or reordered without breaking an existing workbook. The workbook is in G
 from __future__ import annotations
 
 import os
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -248,8 +249,16 @@ class ExcelOutput:
         else:
             self.workbook = _open_workbook(path)
         for name in (*data_sheets, error_sheet):
-            if name not in self.workbook.sheetnames:
+            # Excel compares sheet names ignoring case, so "Daten" is the existing sheet "daten" (renamed),
+            # not a new one; openpyxl would otherwise create "Daten1" and the lookup below would fail.
+            existing = next((title for title in self.workbook.sheetnames if title.casefold() == name.casefold()), None)
+            if existing is None:
                 self.workbook.create_sheet(name)
+            elif existing != name:
+                # Via a temporary name: openpyxl counts the sheet's own old name as a duplicate ("Daten1").
+                sheet = self.workbook[existing]
+                sheet.title = f"~{uuid.uuid4().hex[:20]}"
+                sheet.title = name
         errors = self.workbook[error_sheet]
         if [cell.value for cell in errors[1]] == LEGACY_ERROR_COLUMNS:
             _convert_legacy_error_sheet(errors)
