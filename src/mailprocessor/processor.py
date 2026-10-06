@@ -68,10 +68,16 @@ class RunSummary:
 
 
 def _mail_datetime(date_raw: str) -> datetime | None:
-    """The mail's Date header, or None if it is missing or unreadable."""
+    """The mail's Date header, or None if it is missing, unreadable or cannot be converted to UTC and local time."""
     try:
-        return parsedate_to_datetime(date_raw)
-    except (TypeError, ValueError):
+        moment = parsedate_to_datetime(date_raw)
+        if moment.tzinfo is not None:
+            # Fails at the edge of the calendar (e.g. the year 10000 in UTC) and, on Windows, can fail before 1970.
+            # Checked here, so one such mail cannot abort the run when its age or local time is needed.
+            moment.astimezone(UTC)
+            moment.astimezone()
+        return moment
+    except (TypeError, ValueError, OverflowError, OSError):
         return None
 
 
