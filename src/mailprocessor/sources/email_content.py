@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import codecs
 import hashlib
 from email import policy
 from email.message import Message
@@ -53,11 +52,11 @@ def _decode_part(part: Message) -> str | None:
         return raw_payload if isinstance(raw_payload, str) else None
     charset = part.get_content_charset() or "utf-8"
     try:
-        codecs.lookup(charset)
-    except LookupError:
-        # Unknown/bogus charset labels must not abort processing; fall back to UTF-8.
-        charset = "utf-8"
-    return payload.decode(charset, errors="replace")
+        return payload.decode(charset, errors="replace")
+    except (LookupError, UnicodeError):
+        # Unknown/bogus charset labels must not abort processing; fall back to UTF-8. This includes names
+        # codecs knows but that cannot decode text, e.g. "quoted-printable" or "base64" used as a charset.
+        return payload.decode("utf-8", errors="replace")
 
 
 def extract_text_plain_body(message: Message) -> str:
