@@ -32,5 +32,5 @@ def test_imap_commands_only_go_through_read_only_wrapper() -> None:
     raw_calls = re.findall(r"self\._client\.(\w+)\(", source)
 
     assert set(raw_calls) == {"login", "select", "response", "uid", "logout"}
-    assert 'self._client.select(mailbox, readonly=True)' in source
+    assert 'self._client.select(mailbox_argument(mailbox), readonly=True)' in source
     assert re.findall(r'self\._client\.uid\("(\w+)"', source) == ["search", "fetch"]
