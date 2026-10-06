@@ -80,7 +80,11 @@ def extract_text_plain_body(message: Message) -> str:
 
 
 def parse_message_bytes(
-    raw_bytes: bytes, source_type: Literal["imap", "eml"], source_location: str, origin: str = ""
+    raw_bytes: bytes,
+    source_type: Literal["imap", "eml"],
+    source_location: str,
+    origin: str = "",
+    read_error_identity: str = "",
 ) -> NormalizedMail:
     """Parse an RFC822 message into the application model; shared by all sources."""
     message = BytesParser(policy=policy.default).parsebytes(raw_bytes)
@@ -100,6 +104,7 @@ def parse_message_bytes(
         date_raw=date_raw,
         body_text=body_text,
         origin=origin,
+        read_error_identity=read_error_identity,
         header_text="\n".join(f"{name}: {value}" for name, value in message.items()),
     )
 

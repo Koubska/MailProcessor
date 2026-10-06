@@ -75,7 +75,7 @@ A source yields one item per message: either a `NormalizedMail`, or a `MailReadE
 
 ### 5.1 `.eml` folder
 
-* Reads all files matching a glob (default `*.eml`) in one folder, in sorted order. Files are only opened for reading.
+* Reads all files matching a glob (default `*.eml`) in one folder, ignoring case (`Anfrage.EML` counts on every platform, as it does on Windows), sorted by name ignoring case. Files are only opened for reading.
 * A missing folder is an error, not an empty result.
 * The workbook and the ledger must not be located inside the mail folder.
 
@@ -83,6 +83,7 @@ A source yields one item per message: either a `NormalizedMail`, or a `MailReadE
 
 * Strictly read-only. Allowed commands: `STARTTLS`, `LOGIN`, `EXAMINE`, `UID SEARCH`, `UID FETCH ... (BODY.PEEK[])`, `LOGOUT`. No `STORE`, `COPY`, `MOVE`, `EXPUNGE`, `CLOSE`, append or delete.
 * The server must confirm `[READ-ONLY]` for the mailbox; otherwise the run aborts before any message is fetched.
+* The mailbox name is sent quoted and in IMAP's modified UTF-7, so names with spaces or umlauts (`Sent Items`, `Anfragen/Schüler`) work; a name that is already in modified UTF-7 (`Entw&APw-rfe`) is sent unchanged.
 * Fetches use `BODY.PEEK[]` so the `\Seen` flag is never set, even on servers that ignore read-only mode.
 * All server access goes through an allow-list wrapper (`ReadOnlyImapClient`) that exposes no mutating commands.
 * The subject and sender filters (`FROM`, `SUBJECT`, ASCII entries only) and the age filter (`SINCE`) are passed to the server, so other mails are not downloaded.
@@ -203,6 +204,7 @@ SQLite stores the processing history (`sqlite_path`).
 * Failed messages are retried automatically on every run.
 * A message whose body changed is processed again (new `content_hash`).
 * The workbook is saved first; the ledger is committed only afterwards. A crash, or a workbook locked by Excel, therefore never leaves the ledger ahead of the workbook, and the run can simply be repeated.
+* Only one run writes at a time. A second run started meanwhile (a second window, a scheduled CLI run) stops right away with a message, before it reads the workbook; otherwise it could save its older copy over the first run's new rows, which the ledger would then never export again. Dry runs write nothing and are not limited.
 * `dry_run` / `--dry-run` parses and reports without writing the workbook or the ledger.
 * A run can be stopped (GUI "Stopp"). It stops before the next message and saves everything handled until then, so the next run continues there.
 * "Alles neu exportieren" (GUI, advanced settings) renames the current workbook to `<name>_backup_<date>_<time>.xlsx`, clears the ledger and starts a run, so every message is exported again into a fresh workbook. The workbook is moved first; if it is locked by Excel, nothing changes.

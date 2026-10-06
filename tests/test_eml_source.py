@@ -114,3 +114,11 @@ def test_iter_eml_messages_reports_total_before_reading(tmp_path: Path) -> None:
     next(items)
 
     assert totals == [3]
+
+
+def test_file_pattern_ignores_case_on_every_platform(tmp_path: Path) -> None:
+    # Windows matches "*.eml" case-insensitively; macOS and Linux must not silently skip "B.EML".
+    for name in ("a.eml", "B.EML", "c.Eml", "notes.txt"):
+        (tmp_path / name).write_bytes(b"Subject: x\r\n\r\nBody\r\n")
+
+    assert [message.origin for message in iter_eml_messages(tmp_path)] == ["a.eml", "B.EML", "c.Eml"]

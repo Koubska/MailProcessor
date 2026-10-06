@@ -28,3 +28,7 @@ class ImapLoginError(OSError):
 
 class MissingPasswordError(ValueError):
     """No IMAP password was given."""
+
+
+class RunInProgressError(OSError):
+    """Another run (a second window or a scheduled run) is writing the same ledger and workbook right now."""

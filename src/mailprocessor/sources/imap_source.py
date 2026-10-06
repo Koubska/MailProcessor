@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import imaplib
 import logging
+import re
 import ssl
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
@@ -48,7 +50,7 @@ class ReadOnlyImapClient:
 
         Returns the number of messages the server reports for the mailbox, if it is readable.
         """
-        status, data = self._client.select(mailbox, readonly=True)
+        status, data = self._client.select(mailbox_argument(mailbox), readonly=True)
         if status != "OK":
             raise OSError(f"Failed to open mailbox in readonly mode: {mailbox}")
         _code, confirmation = self._client.response("READ-ONLY")
@@ -111,6 +113,41 @@ def _quote_imap_string(value: str) -> str:
     return f'"{escaped}"'
 
 
+# A name that is already in IMAP's modified UTF-7 (as some mail programs show it, e.g. "Entw&APw-rfe").
+_MODIFIED_UTF7 = re.compile(r"(?:[\x20-\x25\x27-\x7e]|&[A-Za-z0-9+,]*-)*")
+
+
+def _encode_modified_utf7(name: str) -> str:
+    """RFC 3501 section 5.1.3: printable ASCII stays, "&" becomes "&-", the rest is base64 of UTF-16."""
+    encoded: list[str] = []
+    pending: list[str] = []
+
+    def flush() -> None:
+        if pending:
+            data = base64.b64encode("".join(pending).encode("utf-16-be")).decode("ascii")
+            encoded.append("&" + data.rstrip("=").replace("/", ",") + "-")
+            pending.clear()
+
+    for char in name:
+        if "\x20" <= char <= "\x7e":
+            flush()
+            encoded.append("&-" if char == "&" else char)
+        else:
+            pending.append(char)
+    flush()
+    return "".join(encoded)
+
+
+def mailbox_argument(mailbox: str) -> str:
+    """The mailbox name as imaplib must send it: modified UTF-7, quoted (imaplib does neither itself).
+
+    Without this, names with spaces ("Sent Items") are rejected and names with umlauts fail before sending.
+    """
+    if not _MODIFIED_UTF7.fullmatch(mailbox):
+        mailbox = _encode_modified_utf7(mailbox)
+    return _quote_imap_string(mailbox)
+
+
 def _any_of(key: str, entries: list[str]) -> list[str]:
     """SEARCH criteria matching one of the entries: OR k "a" OR k "b" k "c". Empty if the server can't check them."""
     # imaplib sends commands as ASCII. Mails are filtered again after fetching (processor.run_pipeline),
@@ -130,11 +167,15 @@ def _build_search_args(mail_filter: MailFilter, max_age_days: int, now_utc: date
     return tuple(search_args) if search_args else ("ALL",)
 
 
+def _read_error_identity(uid: bytes) -> str:
+    return f"uid:{uid.decode('ascii', errors='replace')}"
+
+
 def _read_error(source_location: str, uid: bytes, reason: str) -> MailReadError:
     return MailReadError(
         source_type="imap",
         source_location=source_location,
-        message_identity=f"uid:{uid.decode('ascii', errors='replace')}",
+        message_identity=_read_error_identity(uid),
         reason=reason,
         origin=f"IMAP uid {uid.decode('ascii', errors='replace')}",
     )
@@ -221,7 +262,11 @@ def iter_imap_messages(
                 continue
             try:
                 yield parse_message_bytes(
-                    raw_bytes, "imap", source_location, origin=f"IMAP uid {uid.decode('ascii', errors='replace')}"
+                    raw_bytes,
+                    "imap",
+                    source_location,
+                    origin=f"IMAP uid {uid.decode('ascii', errors='replace')}",
+                    read_error_identity=_read_error_identity(uid),
                 )
             except Exception as exc:  # one malformed message must not abort the batch
                 yield _read_error(source_location, uid, f"Could not parse message ({type(exc).__name__})")

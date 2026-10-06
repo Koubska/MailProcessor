@@ -222,12 +222,10 @@ def run_pipeline(
     logger.info("Run started: reading from %s%s", _describe_source(app_cfg), dry_note)
     _check_eml_folder(app_cfg)
 
-    excel = ExcelOutput(Path(app_cfg.app.output_xlsx), data_sheets(app_cfg.app, rules), app_cfg.app.sheet_errors)
+    sheets = data_sheets(app_cfg.app, rules)
     several_profiles = len(rules.profiles) > 1
     per_profile_sheets = app_cfg.app.profile_sheets == "per_profile"
     rows_per_profile = dict.fromkeys((profile.name for profile in rules.profiles), 0)
-    if not dry_run:
-        excel.check_writable()
 
     seen = processed = skipped = failed = filtered = 0
     problems: list[Problem] = []
@@ -235,9 +233,14 @@ def run_pipeline(
     max_messages = app_cfg.app.max_messages
 
     with (
+        # Opened first: a writing run holds the ledger's lock from here on, so a second run (another window,
+        # a scheduled run) is refused before it loads the workbook and could save an older copy over this one.
         Ledger(Path(app_cfg.app.sqlite_path), read_only=dry_run) as ledger,
         closing(iter_source_messages(app_cfg, progress=progress)) as messages,
     ):
+        excel = ExcelOutput(Path(app_cfg.app.output_xlsx), sheets, app_cfg.app.sheet_errors)
+        if not dry_run:
+            excel.check_writable()
         if excel.is_new and ledger.count_processed():
             logger.warning(
                 "%s is new but the ledger already lists processed messages; those are not exported again. "
@@ -252,6 +255,10 @@ def run_pipeline(
                 logger.info("Stopped by the user; saving what was processed so far")
                 break
             is_mail = isinstance(item, NormalizedMail)
+            if is_mail and item.read_error_identity and not dry_run:
+                # It was read this time, so an earlier "could not be read" row (e.g. a file still being copied,
+                # a failed IMAP fetch) is resolved, whatever happens to the mail now.
+                excel.remove_errors_for(error_key(item.source_type, item.source_location, item.read_error_identity))
             # Checked before the ledger, so changing the filter later picks these mails up.
             if is_mail and not app_cfg.filter.matches(subject=item.subject, sender=item.from_raw):
                 logger.debug("Left out %s: subject or sender does not match the filter", item.display_name)

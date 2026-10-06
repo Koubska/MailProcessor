@@ -19,6 +19,9 @@ class NormalizedMail:
     origin: str = ""
     # All header lines ("Name: value"), so rules can also match e.g. the From header.
     header_text: str = ""
+    # The identity a MailReadError for the same file or IMAP uid gets ("file:a.eml", "uid:123"), so the error
+    # row of an earlier failed read can be removed once the mail is read.
+    read_error_identity: str = ""
 
     @property
     def display_name(self) -> str:

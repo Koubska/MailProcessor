@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from openpyxl import load_workbook
 
+import mailprocessor.processor as processor
 import mailprocessor.sources.eml_folder_source as eml_source
 from mailprocessor.config import (
     AppConfig,
@@ -18,10 +19,11 @@ from mailprocessor.config import (
     Profile,
     SourceConfig,
 )
+from mailprocessor.errors import RunInProgressError
 from mailprocessor.excel_writer import ERROR_COLUMNS, RECEIVED_COLUMN, TRANSFERRED_COLUMN
 from mailprocessor.ledger import Ledger
 from mailprocessor.models import MailReadError, NormalizedMail
-from mailprocessor.processor import iter_source_messages, run_pipeline, start_over
+from mailprocessor.processor import RunSummary, iter_source_messages, run_pipeline, start_over
 
 
 def _build_config(tmp_path: Path, max_messages: int = 0) -> AppConfig:
@@ -795,3 +797,66 @@ def test_profile_sheet_must_not_be_the_error_sheet(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="same name as the sheet for problems"):
         run_pipeline(config, rules)
+
+
+def _error_rows(tmp_path: Path) -> list[tuple]:
+    return list(load_workbook(tmp_path / "out" / "mail_export.xlsx")["fehler"].iter_rows(min_row=2, values_only=True))
+
+
+def test_error_row_of_an_unreadable_file_goes_once_the_file_is_read(tmp_path: Path, monkeypatch) -> None:
+    # E.g. on Windows a file that is still being copied cannot be opened; the next run reads it fine.
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _write_eml(inbox / "a.eml", GOOD_BODY, "a@example.com")
+    config = _build_config(tmp_path)
+    read_bytes = Path.read_bytes
+
+    def still_copying(path: Path) -> bytes:
+        if path.name == "a.eml":
+            raise PermissionError("in use by another process")
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", still_copying)
+    assert run_pipeline(config, _build_rules()).failed == 1
+    assert len(_error_rows(tmp_path)) == 1
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+
+    assert run_pipeline(config, _build_rules()).processed == 1
+    assert _error_rows(tmp_path) == []
+def test_overlapping_runs_never_lose_rows(tmp_path: Path, monkeypatch) -> None:
+    # Run B has loaded the workbook and waits for its mail source (e.g. a slow IMAP login) while run A
+    # (a second window, or a scheduled CLI run) exports the mail. B must not save its older copy over A's rows.
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _write_eml(inbox / "x.eml", GOOD_BODY, "x@example.com")
+    config = _build_config(tmp_path)
+    b_waits, release_b = threading.Event(), threading.Event()
+    read_mails = processor.iter_eml_messages
+
+    def slow_for_b(*args, **kwargs):
+        if threading.current_thread().name == "B":
+            b_waits.set()
+            release_b.wait(10)
+        yield from read_mails(*args, **kwargs)
+
+    monkeypatch.setattr(processor, "iter_eml_messages", slow_for_b)
+    monkeypatch.setattr("mailprocessor.ledger.LOCK_TIMEOUT_SECONDS", 0.1)
+    outcomes: dict[str, object] = {}
+
+    def run(name: str) -> None:
+        try:
+            outcomes[name] = run_pipeline(config, _build_rules())
+        except Exception as exc:
+            outcomes[name] = exc
+
+    run_b = threading.Thread(target=run, args=("B",), name="B")
+    run_b.start()
+    assert b_waits.wait(10)
+    run("A")
+    release_b.set()
+    run_b.join(10)
+
+    assert [row["Name"] for row in _data_rows(tmp_path)] == ["Jan Must+"]
+    # The run that started second is refused with a clear message instead of racing the first.
+    assert isinstance(outcomes["A"], RunInProgressError)
+    assert isinstance(outcomes["B"], RunSummary) and outcomes["B"].processed == 1
