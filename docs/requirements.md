@@ -207,7 +207,7 @@ SQLite stores the processing history (`sqlite_path`).
 * Only one run writes at a time. A second run started meanwhile (a second window, a scheduled CLI run) stops right away with a message, before it reads the workbook; otherwise it could save its older copy over the first run's new rows, which the ledger would then never export again. Dry runs write nothing and are not limited.
 * `dry_run` / `--dry-run` parses and reports without writing the workbook or the ledger.
 * A run can be stopped (GUI "Stopp"). It stops before the next message and saves everything handled until then, so the next run continues there.
-* "Alles neu exportieren" (GUI, advanced settings) renames the current workbook to `<name>_backup_<date>_<time>.xlsx`, clears the ledger and starts a run, so every message is exported again into a fresh workbook. The workbook is moved first; if it is locked by Excel, nothing changes.
+* "Alles neu exportieren" (GUI, advanced settings) renames the current workbook to `<name>_backup_<date>_<time>.xlsx`, clears the ledger and starts a run, so every message is exported again into a fresh workbook. The workbook is moved first; if it is locked by Excel, nothing changes. A damaged ledger, which stops every run with a message pointing here, is moved to `<name>_damaged_<date>_<time>.db` instead of being cleared.
 
 ---
 

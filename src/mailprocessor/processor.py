@@ -12,7 +12,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from mailprocessor.config import AppConfig, AppSection, ParsingRules
-from mailprocessor.errors import MailFolderNotFoundError, WorkbookLockedError
+from mailprocessor.errors import LedgerUnreadableError, MailFolderNotFoundError, WorkbookLockedError
 from mailprocessor.excel_writer import (
     INTERNAL_ERROR_REASON,
     MISSING_FIELDS_REASON,
@@ -377,9 +377,9 @@ def start_over(app_cfg: AppConfig, now: datetime | None = None) -> Path | None:
     """
     workbook = Path(app_cfg.app.output_xlsx)
     backup = None
+    # Local time, as users read it.
+    stamp = (now or datetime.now().astimezone()).strftime("%Y-%m-%d_%H-%M-%S")
     if workbook.exists():
-        # Local time, as users read it.
-        stamp = (now or datetime.now().astimezone()).strftime("%Y-%m-%d_%H-%M-%S")
         backup = workbook.with_name(f"{workbook.stem}_backup_{stamp}{workbook.suffix}")
         try:
             workbook.rename(backup)
@@ -388,8 +388,16 @@ def start_over(app_cfg: AppConfig, now: datetime | None = None) -> Path | None:
         logger.info("Moved %s to %s", workbook.name, backup.name)
     ledger_path = Path(app_cfg.app.sqlite_path)
     if ledger_path.exists():
-        with Ledger(ledger_path) as ledger:
-            ledger.clear()
-            ledger.commit()
-        logger.info("Cleared the processing history in %s", ledger_path)
+        try:
+            with Ledger(ledger_path) as ledger:
+                ledger.clear()
+                ledger.commit()
+            logger.info("Cleared the processing history in %s", ledger_path)
+        except LedgerUnreadableError:
+            # Damaged: it cannot be cleared, so it is kept aside and the next run starts a new one.
+            damaged = ledger_path.with_name(f"{ledger_path.stem}_damaged_{stamp}{ledger_path.suffix}")
+            ledger_path.rename(damaged)
+            for suffix in ("-wal", "-shm"):  # SQLite's side files belong to the damaged state
+                ledger_path.with_name(ledger_path.name + suffix).unlink(missing_ok=True)
+            logger.warning("The processing history %s was damaged; moved it to %s", ledger_path.name, damaged.name)
     return backup

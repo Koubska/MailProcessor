@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from mailprocessor.errors import RunInProgressError
+from mailprocessor.errors import LedgerUnreadableError, RunInProgressError
 
 # How long a writing run waits for another one to finish before it gives up.
 LOCK_TIMEOUT_SECONDS = 2
@@ -64,21 +64,31 @@ class Ledger:
         else:
             db_path.parent.mkdir(parents=True, exist_ok=True)
             self._connection = sqlite3.connect(db_path, timeout=LOCK_TIMEOUT_SECONDS)
-            try:
+        try:
+            if read_only:
+                # Reads the file's header, so damage shows here and not in the middle of a run.
+                self._connection.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()
+            else:
                 self._connection.execute("PRAGMA journal_mode = WAL")
                 self._connection.execute(_SCHEMA)
                 self._connection.execute(_INDEX)
                 self._connection.commit()
                 # Take the write lock now and keep it until commit/close: only one writing run at a time.
                 self._connection.execute("BEGIN IMMEDIATE")
-            except sqlite3.OperationalError as exc:
-                self._connection.close()
-                if "locked" not in str(exc):
-                    raise
-                raise RunInProgressError(
-                    f"Another run is using {db_path.name} right now (a second window or a scheduled run). "
-                    "Wait until it has finished and try again."
-                ) from None
+        except sqlite3.OperationalError as exc:
+            self._connection.close()
+            if "locked" not in str(exc):
+                raise  # e.g. the file cannot be opened at all; not about its content
+            raise RunInProgressError(
+                f"Another run is using {db_path.name} right now (a second window or a scheduled run). "
+                "Wait until it has finished and try again."
+            ) from None
+        except sqlite3.DatabaseError as exc:
+            self._connection.close()
+            raise LedgerUnreadableError(
+                f"The ledger {db_path} (the list of processed mails) is damaged or not a database ({exc}). "
+                "Use 'Export everything again' to replace it, or restore the file from a backup."
+            ) from None
 
     def __enter__(self) -> Ledger:
         return self
