@@ -14,6 +14,7 @@ from mailprocessor.errors import (
     MissingPasswordError,
     SheetHeaderError,
     WorkbookLockedError,
+    WorkbookUnreadableError,
 )
 from mailprocessor.gui import (
     QueueLogHandler,
@@ -236,6 +237,7 @@ def test_run_summary_text_dry_run_says_nothing_was_saved() -> None:
     [
         (WorkbookLockedError("Cannot write out.xlsx"), "error.workbook_locked"),
         (SheetHeaderError("no header row"), "error.sheet_header"),
+        (WorkbookUnreadableError("Cannot open out.xlsx"), "error.workbook_unreadable"),
         (MailFolderNotFoundError("EML folder does not exist"), "error.mail_folder_missing"),
         (MissingPasswordError("IMAP password is missing"), "error.imap_password_missing"),
         (ImapLoginError("IMAP login failed"), "error.imap_login"),

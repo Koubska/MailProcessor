@@ -31,6 +31,7 @@ from mailprocessor.errors import (
     MissingPasswordError,
     SheetHeaderError,
     WorkbookLockedError,
+    WorkbookUnreadableError,
 )
 from mailprocessor.i18n import t
 from mailprocessor.processor import RunSummary
@@ -260,6 +261,7 @@ def run_summary_text(summary: RunSummary, output_name: str, error_sheet: str, dr
 _FRIENDLY_ERRORS: tuple[tuple[type[BaseException] | tuple[type[BaseException], ...], str], ...] = (
     (WorkbookLockedError, "error.workbook_locked"),
     (SheetHeaderError, "error.sheet_header"),
+    (WorkbookUnreadableError, "error.workbook_unreadable"),
     (MailFolderNotFoundError, "error.mail_folder_missing"),
     (MissingPasswordError, "error.imap_password_missing"),
     (ImapLoginError, "error.imap_login"),

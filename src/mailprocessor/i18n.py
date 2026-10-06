@@ -365,6 +365,11 @@ CATALOG: dict[str, dict[str, str]] = {
             "Die Excel-Datei ist gerade in einem anderen Programm geöffnet. "
             "Bitte Excel schließen und erneut auf „Jetzt übertragen“ klicken."
         ),
+        "error.workbook_unreadable": (
+            "Die Excel-Datei lässt sich nicht öffnen: Sie ist beschädigt, keine .xlsx-Datei oder mit einem "
+            "Kennwort geschützt. Bitte das Kennwort in Excel entfernen oder unter „Einstellungen“ eine andere "
+            "Excel-Datei wählen."
+        ),
         "error.sheet_header": (
             "In einem Blatt der Excel-Datei fehlt die Überschriftenzeile (Zeile 1), daher lassen sich die "
             "Spalten nicht zuordnen. Bitte die Überschriften wiederherstellen oder unter „Einstellungen“ "
@@ -719,6 +724,10 @@ CATALOG: dict[str, dict[str, str]] = {
         "error.workbook_locked": (
             "The Excel file is open in another program. Close Excel and click “Transfer now” "
             "again."
+        ),
+        "error.workbook_unreadable": (
+            "The Excel file cannot be opened: it is damaged, not an .xlsx file, or protected with a password. "
+            "Remove the password in Excel or choose another Excel file under “Settings”."
         ),
         "error.sheet_header": (
             "A sheet of the Excel file has no header row (row 1), so its columns cannot be matched. "
