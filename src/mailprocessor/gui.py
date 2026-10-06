@@ -27,6 +27,7 @@ from mailprocessor.config import (
 )
 from mailprocessor.errors import (
     ImapLoginError,
+    LedgerUnreadableError,
     MailFolderNotFoundError,
     MissingPasswordError,
     RunInProgressError,
@@ -264,6 +265,7 @@ _FRIENDLY_ERRORS: tuple[tuple[type[BaseException] | tuple[type[BaseException], .
     (RunInProgressError, "error.run_in_progress"),
     (SheetHeaderError, "error.sheet_header"),
     (WorkbookUnreadableError, "error.workbook_unreadable"),
+    (LedgerUnreadableError, "error.ledger_unreadable"),
     (MailFolderNotFoundError, "error.mail_folder_missing"),
     (MissingPasswordError, "error.imap_password_missing"),
     (ImapLoginError, "error.imap_login"),

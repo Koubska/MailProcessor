@@ -374,6 +374,11 @@ CATALOG: dict[str, dict[str, str]] = {
             "Gerade läuft schon eine Übertragung, z. B. in einem zweiten Fenster oder als geplante Aufgabe. "
             "Bitte warten, bis sie fertig ist, und dann erneut auf „Jetzt übertragen“ klicken."
         ),
+        "error.ledger_unreadable": (
+            "Die Liste der bereits übertragenen E-Mails (Ledger-Datei) ist beschädigt. Unter „Einstellungen“ "
+            "mit „Alles neu exportieren …“ eine neue anlegen: Dann werden alle E-Mails erneut übertragen, die "
+            "bisherige Excel-Datei bleibt als Sicherung erhalten."
+        ),
         "error.sheet_header": (
             "In einem Blatt der Excel-Datei fehlt die Überschriftenzeile (Zeile 1), daher lassen sich die "
             "Spalten nicht zuordnen. Bitte die Überschriften wiederherstellen oder unter „Einstellungen“ "
@@ -736,6 +741,11 @@ CATALOG: dict[str, dict[str, str]] = {
         "error.run_in_progress": (
             "A transfer is already running, e.g. in a second window or as a scheduled task. "
             "Wait until it has finished, then click “Transfer now” again."
+        ),
+        "error.ledger_unreadable": (
+            "The list of already transferred emails (ledger file) is damaged. Use “Export everything again …” "
+            "under “Settings” to start a new one: all emails are transferred again, and the current Excel file "
+            "is kept as a backup."
         ),
         "error.sheet_header": (
             "A sheet of the Excel file has no header row (row 1), so its columns cannot be matched. "

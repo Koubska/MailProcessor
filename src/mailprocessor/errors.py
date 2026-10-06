@@ -32,3 +32,7 @@ class MissingPasswordError(ValueError):
 
 class RunInProgressError(OSError):
     """Another run (a second window or a scheduled run) is writing the same ledger and workbook right now."""
+
+
+class LedgerUnreadableError(ValueError):
+    """The ledger file (the list of processed mails) exists but is damaged or not a database."""

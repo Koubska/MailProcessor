@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+from mailprocessor.errors import LedgerUnreadableError
 from mailprocessor.ledger import Ledger, LedgerKey, compute_content_hash
 
 
@@ -73,3 +76,14 @@ def test_read_only_ledger_reads_existing_database(tmp_path: Path) -> None:
 
     with Ledger(db_path, read_only=True) as ledger:
         assert ledger.is_already_processed(key) is True
+
+
+@pytest.mark.parametrize("read_only", [False, True])
+@pytest.mark.parametrize("content", [b"not a database" * 100, b"SQLite format 3\x00" + bytes(30)])
+def test_a_damaged_ledger_file_is_reported_clearly(tmp_path: Path, read_only: bool, content: bytes) -> None:
+    path = tmp_path / "ledger.db"
+    path.write_bytes(content)
+
+    with pytest.raises(LedgerUnreadableError, match="ledger.db"):
+        Ledger(path, read_only=read_only)
+    assert path.read_bytes() == content

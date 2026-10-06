@@ -19,7 +19,7 @@ from mailprocessor.config import (
     Profile,
     SourceConfig,
 )
-from mailprocessor.errors import RunInProgressError
+from mailprocessor.errors import LedgerUnreadableError, RunInProgressError
 from mailprocessor.excel_writer import ERROR_COLUMNS, RECEIVED_COLUMN, TRANSFERRED_COLUMN
 from mailprocessor.ledger import Ledger
 from mailprocessor.models import MailReadError, NormalizedMail
@@ -551,6 +551,23 @@ def test_start_over_keeps_backup_and_exports_everything_again(tmp_path: Path) ->
     again = run_pipeline(config, _build_rules())
     assert (again.processed, again.skipped) == (2, 0)
     assert load_workbook(tmp_path / "out" / "mail_export.xlsx")["daten"].max_row == 3
+
+
+def test_start_over_replaces_a_damaged_ledger(tmp_path: Path) -> None:
+    # A damaged ledger stops every run; "Alles neu exportieren" must still work as the way out.
+    _inbox_with_good_mails(tmp_path, 2)
+    config = _build_config(tmp_path)
+    ledger_path = tmp_path / "data" / "ledger.db"
+    ledger_path.parent.mkdir()
+    ledger_path.write_bytes(b"not a database" * 100)
+    with pytest.raises(LedgerUnreadableError):
+        run_pipeline(config, _build_rules())
+
+    start_over(config, now=datetime(2026, 10, 5, 21, 30, 0, tzinfo=UTC))
+
+    assert (tmp_path / "data" / "ledger_damaged_2026-10-05_21-30-00.db").read_bytes() == b"not a database" * 100
+    again = run_pipeline(config, _build_rules())
+    assert (again.processed, again.skipped) == (2, 0)
 
 
 def test_start_over_without_previous_run_does_nothing(tmp_path: Path) -> None:
