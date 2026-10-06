@@ -30,7 +30,12 @@ class AppSection(BaseModel):
 
     @model_validator(mode="after")
     def validate_sheet_names(self) -> AppSection:
-        if self.sheet_data == self.sheet_errors:
+        for setting in ("sheet_data", "sheet_errors"):
+            problem = sheet_name_problem(getattr(self, setting), setting)
+            if problem:
+                raise ValueError(problem)
+        # Excel compares sheet names ignoring case, so "Daten" and "daten" would be the same sheet.
+        if self.sheet_data.casefold() == self.sheet_errors.casefold():
             raise ValueError("sheet_data and sheet_errors must be different sheet names")
         return self
 
@@ -173,20 +178,25 @@ SHEET_NAME_MAX_LENGTH = 31
 SHEET_NAME_FORBIDDEN = "[]:*?/\\"
 
 
-def profile_name_problem(name: str) -> str | None:
-    """Why `name` cannot be a profile (and sheet) name, or None if it can."""
+def sheet_name_problem(name: str, what: str = "sheet name") -> str | None:
+    """Why `name` cannot be an Excel sheet name, or None if it can. `what` names the setting in the message."""
     if not name.strip():
-        return "a profile name is required"
+        return f"a {what} is required"
     if name != name.strip():
-        return f"profile name '{name}' must not start or end with spaces"
+        return f"{what} '{name}' must not start or end with spaces"
     if len(name) > SHEET_NAME_MAX_LENGTH:
-        return f"profile name '{name}' is longer than {SHEET_NAME_MAX_LENGTH} characters"
+        return f"{what} '{name}' is longer than {SHEET_NAME_MAX_LENGTH} characters"
     forbidden = sorted({char for char in name if char in SHEET_NAME_FORBIDDEN})
     if forbidden:
-        return f"profile name '{name}' must not contain {' '.join(forbidden)}"
+        return f"{what} '{name}' must not contain {' '.join(forbidden)}"
     if name.startswith("'") or name.endswith("'"):
-        return f"profile name '{name}' must not start or end with an apostrophe"
+        return f"{what} '{name}' must not start or end with an apostrophe"
     return None
+
+
+def profile_name_problem(name: str) -> str | None:
+    """Why `name` cannot be a profile (and sheet) name, or None if it can."""
+    return sheet_name_problem(name, "profile name")
 
 
 class Profile(BaseModel):

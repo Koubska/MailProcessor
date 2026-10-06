@@ -51,6 +51,7 @@ def test_form_keeps_the_profile_sheets_choice() -> None:
         ({"max_messages": "-1"}, "max_messages", "ganze Zahl"),
         ({"output_xlsx": "out/export.csv"}, "output_xlsx", ".xlsx"),
         ({"sheet_errors": "daten"}, "sheet_errors", "verschiedene Namen"),
+        ({"sheet_errors": "Daten"}, "sheet_errors", "verschiedene Namen"),  # one sheet for Excel
         ({"source_type": "imap", "imap_host": ""}, "imap_host", "E-Mail-Server"),
         ({"source_type": "imap", "imap_port": "99999"}, "imap_port", "Portnummer"),
     ],

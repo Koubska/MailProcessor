@@ -4,6 +4,7 @@ import pytest
 
 from mailprocessor.config import (
     DEFAULT_PROFILE_NAME,
+    AppSection,
     FieldRule,
     ParsingRules,
     Profile,
@@ -272,3 +273,18 @@ def test_profile_names_must_be_valid_sheet_names(name: str) -> None:
 
 def test_profile_name_may_contain_spaces_and_umlauts() -> None:
     assert profile_name_problem("Anmeldung Förderkurs") is None
+
+
+@pytest.mark.parametrize(
+    ("sheet_data", "sheet_errors", "message"),
+    [
+        # Excel compares sheet names ignoring case: these would be one sheet.
+        ("Daten", "daten", "must be different sheet names"),
+        ("x" * 32, "fehler", "longer than 31 characters"),  # Excel reports such a file as damaged
+        ("daten/2026", "fehler", "must not contain /"),
+        ("daten", "", "is required"),
+    ],
+)
+def test_sheet_names_must_be_valid_excel_sheet_names(sheet_data: str, sheet_errors: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        AppSection(sqlite_path="l.db", output_xlsx="o.xlsx", sheet_data=sheet_data, sheet_errors=sheet_errors)

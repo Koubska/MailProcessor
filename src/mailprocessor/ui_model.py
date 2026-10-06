@@ -105,7 +105,7 @@ def config_from_form(values: FormValues, lang: str) -> tuple[AppConfig | None, d
     for key, name in (("sheet_data", sheet_data), ("sheet_errors", sheet_errors)):
         if not name:
             errors[key] = t("error.form.sheet_empty", lang)
-    if sheet_data and sheet_data == sheet_errors:
+    if sheet_data and sheet_data.casefold() == sheet_errors.casefold():  # Excel ignores case here
         errors["sheet_errors"] = t("error.form.sheets_equal", lang)
     if not _text(values, "sqlite_path"):
         errors["sqlite_path"] = t("error.form.sqlite_empty", lang)
