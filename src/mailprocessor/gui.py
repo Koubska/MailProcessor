@@ -29,6 +29,7 @@ from mailprocessor.errors import (
     ImapLoginError,
     MailFolderNotFoundError,
     MissingPasswordError,
+    RunInProgressError,
     SheetHeaderError,
     WorkbookLockedError,
 )
@@ -259,6 +260,7 @@ def run_summary_text(summary: RunSummary, output_name: str, error_sheet: str, dr
 # Most specific first: e.g. ImapLoginError and ssl.SSLError are OSErrors too.
 _FRIENDLY_ERRORS: tuple[tuple[type[BaseException] | tuple[type[BaseException], ...], str], ...] = (
     (WorkbookLockedError, "error.workbook_locked"),
+    (RunInProgressError, "error.run_in_progress"),
     (SheetHeaderError, "error.sheet_header"),
     (MailFolderNotFoundError, "error.mail_folder_missing"),
     (MissingPasswordError, "error.imap_password_missing"),

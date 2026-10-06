@@ -8,6 +8,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from mailprocessor.errors import RunInProgressError
+
+# How long a writing run waits for another one to finish before it gives up.
+LOCK_TIMEOUT_SECONDS = 2
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS processed_messages (
     source_type TEXT NOT NULL,
@@ -40,6 +45,9 @@ def compute_content_hash(body_text: str) -> str:
 class Ledger:
     """Processing history. Writes are held in one transaction until `commit()`.
 
+    Opened for writing, it holds the database's write lock until `commit()` or `close()`, so two runs never
+    write at the same time; the second one raises `RunInProgressError`.
+
     The pipeline commits only after the Excel workbook was saved, so a crash or a locked
     workbook leaves ledger and workbook consistent (the run simply repeats next time).
     With `read_only=True` (dry runs) the database file is never created or modified.
@@ -55,11 +63,22 @@ class Ledger:
                 self._connection.execute(_SCHEMA)
         else:
             db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._connection = sqlite3.connect(db_path)
-            self._connection.execute("PRAGMA journal_mode = WAL")
-            self._connection.execute(_SCHEMA)
-            self._connection.execute(_INDEX)
-            self._connection.commit()
+            self._connection = sqlite3.connect(db_path, timeout=LOCK_TIMEOUT_SECONDS)
+            try:
+                self._connection.execute("PRAGMA journal_mode = WAL")
+                self._connection.execute(_SCHEMA)
+                self._connection.execute(_INDEX)
+                self._connection.commit()
+                # Take the write lock now and keep it until commit/close: only one writing run at a time.
+                self._connection.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError as exc:
+                self._connection.close()
+                if "locked" not in str(exc):
+                    raise
+                raise RunInProgressError(
+                    f"Another run is using {db_path.name} right now (a second window or a scheduled run). "
+                    "Wait until it has finished and try again."
+                ) from None
 
     def __enter__(self) -> Ledger:
         return self
