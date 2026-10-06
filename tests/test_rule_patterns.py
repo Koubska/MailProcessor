@@ -104,3 +104,35 @@ def test_generated_patterns_compile_for_all_types() -> None:
         FieldRule(column="d", type="email", label="$"),
     ):
         re.compile(rule.regex)
+
+
+# HTML forms write "Name:&nbsp;Max"; Outlook's plain text also contains U+00A0. Readers see an ordinary space.
+NBSP_TEXT = "\n".join(
+    [
+        "Name:\xa0Max Mustermann",
+        "Telefon\xa0des\xa0Kindes: 0123 456",
+        "\xa0Klasse:\xa05b",
+        "E-Mail:\xa0max@example.com",
+        "Bemerkung\xa0:",
+        "Turnschuhe",
+    ]
+)
+
+
+@pytest.mark.parametrize(
+    ("rule", "expected"),
+    [
+        (FieldRule(column="X", type="label", label="Name"), "Max Mustermann"),
+        (FieldRule(column="X", type="label", label="Telefon des Kindes"), "0123 456"),
+        (FieldRule(column="X", type="label", label="Klasse"), "5b"),
+        (FieldRule(column="X", type="email", label="E-Mail"), "max@example.com"),
+        (FieldRule(column="X", type="next_line", label="Bemerkung"), "Turnschuhe"),
+    ],
+)
+def test_non_breaking_spaces_count_as_spaces(rule: FieldRule, expected: str) -> None:
+    assert _value(rule, NBSP_TEXT) == expected
+
+
+def test_non_breaking_space_does_not_join_lines() -> None:
+    # Still one line only: a label without a value must not take the next line's text.
+    assert _value(FieldRule(column="X", type="label", label="Leer"), "Leer:\xa0\nNächste Zeile") is None

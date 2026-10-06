@@ -169,7 +169,7 @@ required = true
 * Every profile needs at least one field. The GUI keeps a new, still empty profile while editing but saves and runs only profiles with fields.
 * In the GUI, the column name suggests the columns of the other profiles (choosing one for a new field copies that profile's rule) and states where the column ends up: shared with other profiles, only this profile's, or, as a warning, a near-duplicate of another profile's column (same name ignoring case, spaces and `-_.:/`) that would become a second column.
 
-* Labels are matched tolerantly: case-insensitive, any spacing, optional colon, at the start of a line, and not as a word prefix ("Tag" does not match "Tagesordnung:"). `label` and `email` never take a value from the next line. Inputs are matched literally (escaped).
+* Labels are matched tolerantly: case-insensitive, any spacing (also non-breaking spaces, as HTML forms and Outlook write them), optional colon, at the start of a line, and not as a word prefix ("Tag" does not match "Tagesordnung:"). `label` and `email` never take a value from the next line. Inputs are matched literally (escaped).
 * A rule without `type` is a `regex` rule, so files from before the simple types keep working. The GUI writes only the inputs of each rule's type. "Als Regex bearbeiten" converts a simple rule into a `regex` rule; this is one-way.
 * Rules are matched against the email text followed by the email's header lines (`Name: value`). Text comes first, so a label in the text wins over a header; headers are the fallback (e.g. the sender in `From:`). Whitespace in the value is collapsed.
 * The default rules extract all fields from `docs/example.eml`; `tests/test_default_rules.py` guards this.
