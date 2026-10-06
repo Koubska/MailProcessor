@@ -122,13 +122,15 @@ class _Sheet:
             if name:
                 self.columns.setdefault(name, cell.column)
                 last_header = cell.column
-        has_rows = sheet.max_row > 1
-        if not self.columns and has_rows:
+        last_row, last_column = _used_extent(sheet)
+        if not self.columns and last_row > 1:
             raise SheetHeaderError(
                 f"Sheet '{sheet.title}' has data but no header row; restore row 1 or choose a new output file."
             )
+        # New rows go right after the last row with a value.
+        self.next_row = last_row + 1
         # New columns go after everything that is used, also after notes in columns without a header.
-        next_column = max(last_header, sheet.max_column if has_rows else 0) + 1
+        next_column = max(last_header, last_column) + 1
         for name in wanted:
             if name not in self.columns:
                 sheet.cell(row=1, column=next_column, value=name)
@@ -136,27 +138,39 @@ class _Sheet:
                 next_column += 1
 
     def append(self, values: dict[str, object]) -> None:
-        width = max(self.columns[name] for name in values)
-        row: list[object] = [None] * width
         for name, value in values.items():
-            row[self.columns[name] - 1] = _cell_value(value)
-        self.sheet.append(row)
-        for cell in self.sheet[self.sheet.max_row]:
+            cell = self.sheet.cell(row=self.next_row, column=self.columns[name], value=_cell_value(value))
             if isinstance(cell.value, str) and cell.value.startswith("="):
                 # openpyxl turns any string starting with "=" into a live formula. Values come from
                 # untrusted email content, so always store them as plain text (formula injection).
                 cell.data_type = "s"
             elif isinstance(cell.value, datetime):
                 cell.number_format = DATE_FORMAT
+        self.next_row += 1
 
     def delete_rows_where(self, column: str, matches: Callable[[object], bool]) -> None:
         index = self.columns[column]
-        for row_index in range(self.sheet.max_row, 1, -1):
+        for row_index in range(self.next_row - 1, 1, -1):
             if matches(self.sheet.cell(row=row_index, column=index).value):
                 self.sheet.delete_rows(row_index)
+                self.next_row -= 1
 
     def letter(self, column: str) -> str:
         return get_column_letter(self.columns[column])
+
+
+def _used_extent(sheet: Worksheet) -> tuple[int, int]:
+    """The last row and column below the header that hold a value (1 and 0 if there are none).
+
+    Formatted but empty cells, e.g. borders or number formats set ahead in Excel, count for openpyxl's
+    max_row/max_column; rows appended after them would end up far below the data.
+    """
+    last_row, last_column = 1, 0
+    for row_index, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+        used = [index for index, value in enumerate(row, start=1) if value is not None]
+        if used:
+            last_row, last_column = row_index, max(last_column, used[-1])
+    return last_row, last_column
 
 
 def _convert_legacy_error_sheet(sheet: Worksheet) -> None:

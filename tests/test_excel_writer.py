@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Border, Side
 from openpyxl.worksheet.dimensions import ColumnDimension
 
 from mailprocessor.errors import SheetHeaderError, WorkbookUnreadableError
@@ -476,3 +477,28 @@ def test_sheet_names_differing_only_in_case_reuse_the_existing_sheet(tmp_path: P
     workbook = load_workbook(path)
     assert workbook.sheetnames == ["Anmeldung", "Fehler"]
     assert [row[0] for row in workbook["Anmeldung"].iter_rows(values_only=True)] == ["Name", "Anna", "Ben"]
+
+
+def test_rows_and_columns_follow_the_data_not_formatted_empty_cells(tmp_path: Path) -> None:
+    # Users format a range ahead in Excel (borders, number formats). Those cells are empty but count for
+    # openpyxl's max_row/max_column; new rows must still follow the last row, new columns the last column.
+    path = tmp_path / "output.xlsx"
+    first = _output(path, ["Name"])
+    first.append_data({"Name": "Anna"}, "Text")
+    first.save()
+    workbook = load_workbook(path)
+    sheet = workbook["daten"]
+    for row in sheet.iter_rows(min_row=3, max_row=200, max_col=30):
+        for cell in row:
+            cell.border = Border(bottom=Side(style="thin"))
+    workbook.save(path)
+
+    second = _output(path, ["Name", "Kurs"])
+    second.append_data({"Name": "Ben", "Kurs": "Chemie"}, "Text")
+    second.save()
+
+    rows = _rows(path)
+    assert [row[0] for row in rows[:3]] == ["Name", "Anna", "Ben"]
+    header = [value for value in rows[0] if value is not None]
+    assert header == ["Name", *FIXED_COLUMNS, "Kurs"]
+    assert rows[0].index("Kurs") == len(header) - 1  # right after the used columns, not after column 30
