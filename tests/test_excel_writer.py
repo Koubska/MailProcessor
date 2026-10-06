@@ -1,59 +1,19 @@
-import re
-import zipfile
-from datetime import datetime
+"""The data sheets: columns found by name, user columns kept, values stored safely."""
+
 from pathlib import Path
 
 import pytest
+from excel_helpers import DATA_COLUMNS, FIXED_COLUMNS, RECEIVED_AT, RUN_AT, _error, _output, _rows
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Border, Side
-from openpyxl.worksheet.dimensions import ColumnDimension
 
 from mailprocessor.errors import SheetHeaderError, WorkbookUnreadableError
 from mailprocessor.excel_writer import (
-    CONTENT_COLUMN,
-    CONTENT_COLUMN_WIDTH,
-    DATE_COLUMN_WIDTH,
     DATE_FORMAT,
     ERROR_COLUMNS,
     EXCEL_CELL_LIMIT,
-    KEY_COLUMN,
-    LEGACY_ERROR_COLUMNS,
-    MAX_COLUMN_WIDTH,
-    MIN_COLUMN_WIDTH,
-    RECEIVED_COLUMN,
-    TRANSFERRED_COLUMN,
-    ErrorEntry,
     ExcelOutput,
-    error_key,
 )
-
-DATA_COLUMNS = ["Mail-Adresse", "Name", "Kurs", "Zeit", "Telefonnummer"]
-FIXED_COLUMNS = [RECEIVED_COLUMN, TRANSFERRED_COLUMN, CONTENT_COLUMN]
-RUN_AT = datetime(2026, 10, 6, 9, 30)
-RECEIVED_AT = datetime(2026, 10, 5, 14, 0)
-
-
-def _output(path: Path, columns: list[str]) -> ExcelOutput:
-    return ExcelOutput(path, {"daten": columns}, "fehler", now=RUN_AT)
-
-
-def _rows(path: Path, sheet: str = "daten") -> list[tuple]:
-    return list(load_workbook(path)[sheet].iter_rows(values_only=True))
-
-
-def _error(key: str, reason: str = "Pflichtfelder nicht gefunden", missing: tuple[str, ...] = ("Telefonnummer",)):
-    return ErrorEntry(
-        key=key,
-        name=f"{key}.eml",
-        sender="Max Mustermann <max@example.com>",
-        subject="Anmeldung",
-        received=RECEIVED_AT,
-        missing=missing,
-        reason=reason,
-    )
-
-
-# --- data sheet
 
 
 def test_several_data_sheets_get_their_own_columns_and_rows(tmp_path: Path) -> None:
@@ -277,129 +237,6 @@ def test_check_writable_reports_locked_workbook(tmp_path: Path, monkeypatch) -> 
         output.check_writable()
 
 
-# --- error sheet
-
-
-def test_error_rows_are_readable(tmp_path: Path) -> None:
-    path = tmp_path / "output.xlsx"
-    output = _output(path, DATA_COLUMNS)
-
-    output.upsert_error(_error("eml|/mails|<a@example.com>", missing=("Telefonnummer", "Kurs")))
-    output.save()
-
-    sheet = load_workbook(path)["fehler"]
-    row = dict(zip(ERROR_COLUMNS, next(sheet.iter_rows(min_row=2, values_only=True)), strict=True))
-    assert row == {
-        "E-Mail": "eml|/mails|<a@example.com>.eml",
-        "Absender": "Max Mustermann <max@example.com>",
-        "Betreff": "Anmeldung",
-        "Eingegangen am": RECEIVED_AT,
-        "Fehlende Felder": "Telefonnummer, Kurs",
-        "Grund": "Pflichtfelder nicht gefunden",
-        "Geprüft am": RUN_AT,
-        KEY_COLUMN: "eml|/mails|<a@example.com>",
-    }
-    key_letter = sheet.cell(row=1, column=ERROR_COLUMNS.index(KEY_COLUMN) + 1).column_letter
-    assert sheet.column_dimensions[key_letter].hidden  # internal; only used to find the row again
-
-
-def test_upsert_error_keeps_one_row_per_message(tmp_path: Path) -> None:
-    path = tmp_path / "output.xlsx"
-    output = _output(path, DATA_COLUMNS)
-
-    output.upsert_error(_error("msg-1", "erster Grund"))
-    output.upsert_error(_error("msg-2"))
-    output.upsert_error(_error("msg-1", "zweiter Grund"))
-    output.save()
-
-    reason, key = ERROR_COLUMNS.index("Grund"), ERROR_COLUMNS.index(KEY_COLUMN)
-    rows = _rows(path, "fehler")[1:]
-    assert [(row[key], row[reason]) for row in rows] == [
-        ("msg-2", "Pflichtfelder nicht gefunden"),
-        ("msg-1", "zweiter Grund"),
-    ]
-
-
-def test_remove_errors_for_drops_the_row_of_a_mail_that_now_works(tmp_path: Path) -> None:
-    path = tmp_path / "output.xlsx"
-    output = _output(path, DATA_COLUMNS)
-    output.upsert_error(_error("msg-1"))
-
-    output.remove_errors_for("msg-1")
-    output.save()
-
-    assert load_workbook(path)["fehler"].max_row == 1
-
-
-def test_old_english_error_sheet_is_converted(tmp_path: Path) -> None:
-    path = tmp_path / "output.xlsx"
-    old = Workbook()
-    old.active.title = "daten"
-    old.active.append(["Name", CONTENT_COLUMN])
-    errors = old.create_sheet("fehler")
-    errors.append(LEGACY_ERROR_COLUMNS)
-    checked = "2026-10-03T20:00:00+00:00"
-    missing = "Required fields missing: Telefonnummer"
-    errors.append(["eml", "/mails", "<a@example.com>", "Telefonnummer", missing, checked])
-    errors.append(["eml", "/mails", "file:kaputt.eml", "", "Could not read file (OSError): disk", checked])
-    old.save(path)
-
-    _output(path, ["Name"]).save()
-
-    header, *data = _rows(path, "fehler")
-    rows = [dict(zip(ERROR_COLUMNS, row, strict=True)) for row in data]
-    assert list(header) == list(ERROR_COLUMNS)
-    assert rows[0]["E-Mail"] == "<a@example.com>"
-    assert rows[0]["Fehlende Felder"] == "Telefonnummer"
-    assert rows[0]["Grund"] == "Pflichtfelder nicht gefunden"
-    assert rows[0][KEY_COLUMN] == error_key("eml", "/mails", "<a@example.com>")
-    assert rows[1]["E-Mail"] == "kaputt.eml"
-    assert rows[1]["Grund"] == "Could not read file (OSError): disk"
-    assert isinstance(rows[0]["Geprüft am"], datetime)
-
-    # The converted row is found again: the next failure of that mail replaces it.
-    again = _output(path, ["Name"])
-    again.upsert_error(_error(error_key("eml", "/elsewhere", "<a@example.com>")))
-    again.save()
-    assert len(_rows(path, "fehler")) == 3
-
-
-# --- formatting
-
-
-def test_save_formats_header_and_column_widths(tmp_path: Path) -> None:
-    path = tmp_path / "output.xlsx"
-    output = _output(path, DATA_COLUMNS)
-    output.append_data(
-        {"Mail-Adresse": "max.mustermann@mail.com", "Name": "x" * 200}, "Text\n" * 50, received=RECEIVED_AT
-    )
-    output.save()
-
-    sheet = load_workbook(path)["daten"]
-    assert all(cell.font.bold for cell in sheet[1])
-    widths = {letter: sheet.column_dimensions[letter].width for letter in "ABCFGH"}
-    assert widths["A"] == len("max.mustermann@mail.com") + 2
-    assert widths["B"] == MAX_COLUMN_WIDTH
-    assert widths["C"] == MIN_COLUMN_WIDTH  # "Kurs", empty
-    assert widths["F"] == widths["G"] == DATE_COLUMN_WIDTH
-    assert widths["H"] == CONTENT_COLUMN_WIDTH
-    assert not sheet["H2"].alignment.wrap_text  # one row per mail, however long the text
-
-
-def test_save_keeps_column_widths_set_by_the_user(tmp_path: Path) -> None:
-    path = tmp_path / "output.xlsx"
-    _output(path, DATA_COLUMNS).save()
-    workbook = load_workbook(path)
-    workbook["daten"].column_dimensions["B"].width = 33
-    workbook.save(path)
-
-    output = _output(path, DATA_COLUMNS)
-    output.append_data({"Name": "x" * 200}, "Text")
-    output.save()
-
-    assert load_workbook(path)["daten"].column_dimensions["B"].width == 33
-
-
 @pytest.mark.parametrize(
     "content",
     [
@@ -415,51 +252,6 @@ def test_a_workbook_that_cannot_be_opened_is_reported_clearly(tmp_path: Path, co
     with pytest.raises(WorkbookUnreadableError, match="output.xlsx"):
         _output(path, DATA_COLUMNS)
     assert path.read_bytes() == content  # left as it is
-
-
-def _column_ranges(path: Path, sheet_index: int = 1) -> list[tuple[int, int]]:
-    xml = zipfile.ZipFile(path).read(f"xl/worksheets/sheet{sheet_index}.xml").decode()
-    return [(int(low), int(high)) for low, high in re.findall(r'<col [^>]*min="(\d+)" max="(\d+)"', xml)]
-
-
-def test_save_keeps_a_width_set_for_several_columns_without_overlapping_ranges(tmp_path: Path) -> None:
-    # Excel stores one width for several selected columns as one range (<col min="2" max="4">).
-    # Widths added on top for columns inside it make Excel report the file as damaged.
-    path = tmp_path / "output.xlsx"
-    _output(path, DATA_COLUMNS).save()
-    workbook = load_workbook(path)
-    sheet = workbook["daten"]
-    for letter in list(sheet.column_dimensions):
-        del sheet.column_dimensions[letter]
-    sheet.column_dimensions["B"] = ColumnDimension(sheet, index="B", min=2, max=4, width=33, customWidth=True)
-    workbook.save(path)
-
-    output = _output(path, DATA_COLUMNS)
-    output.append_data({"Name": "x" * 200, "Kurs": "y" * 200}, "Text")
-    output.save()
-
-    ranges = sorted(_column_ranges(path))
-    covered = [column for low, high in ranges for column in range(low, high + 1)]
-    assert len(covered) == len(set(covered)), ranges
-    assert (2, 4) in ranges
-    assert load_workbook(path)["daten"].column_dimensions["B"].width == 33
-
-
-def test_error_rows_of_earlier_versions_are_found_without_the_location(tmp_path: Path) -> None:
-    # Earlier versions wrote "type|location|identity"; such a row must still be replaced, not duplicated.
-    path = tmp_path / "output.xlsx"
-    first = _output(path, DATA_COLUMNS)
-    first.upsert_error(_error("eml|/old/mails|<a@example.com>"))
-    first.upsert_error(_error("eml|/old/mails|<b@example.com>"))
-    first.save()
-
-    second = _output(path, DATA_COLUMNS)
-    second.upsert_error(_error(error_key("eml", "/new/mails", "<a@example.com>")))
-    second.remove_errors_for(error_key("imap", "imap://h:993/INBOX", "<b@example.com>"))  # other source type
-    second.save()
-
-    keys = sorted(row[-1] for row in _rows(path, "fehler")[1:])
-    assert keys == ["eml|/old/mails|<b@example.com>", "eml|<a@example.com>"]
 
 
 def test_sheet_names_differing_only_in_case_reuse_the_existing_sheet(tmp_path: Path) -> None:

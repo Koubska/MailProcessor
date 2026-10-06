@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from mailprocessor.window_state import WindowState, fit_geometry, load_window_state, save_window_state
+from mailprocessor.gui.window_state import WindowState, fit_geometry, load_window_state, save_window_state
 
 
 def test_missing_or_broken_state_file_gives_defaults(tmp_path: Path) -> None:

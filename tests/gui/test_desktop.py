@@ -1,10 +1,12 @@
-"""Sharp display on scaled Windows screens (125 %, 150 %)."""
+"""What the GUI needs from the system: sharp display on scaled Windows screens (125 %, 150 %), opening files."""
 
 import sys
+from pathlib import Path
 
 import pytest
 
-from mailprocessor.gui import enable_windows_dpi_awareness, ui_scale
+import mailprocessor.gui.desktop as gui_module
+from mailprocessor.gui.desktop import enable_windows_dpi_awareness, open_in_default_app, ui_scale
 
 
 class _Untouchable:
@@ -83,3 +85,14 @@ def test_real_windows_api_and_tk_window() -> None:
         assert ui_scale(root.winfo_fpixels("1i")) >= 1.0
     finally:
         root.destroy()
+
+
+@pytest.mark.parametrize(("platform", "command"), [("darwin", "open"), ("linux", "xdg-open")])
+def test_open_in_default_app_uses_the_system_opener(monkeypatch, tmp_path: Path, platform: str, command: str) -> None:
+    calls = []
+    monkeypatch.setattr(gui_module.sys, "platform", platform)
+    monkeypatch.setattr(gui_module.subprocess, "Popen", lambda args: calls.append(args))
+
+    open_in_default_app(tmp_path / "out.xlsx")
+
+    assert calls == [[command, str(tmp_path / "out.xlsx")]]

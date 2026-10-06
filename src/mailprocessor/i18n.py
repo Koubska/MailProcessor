@@ -786,6 +786,11 @@ def resolve_language(explicit: str | None = None) -> str:
     return "de"
 
 
+def quote(text: str, language: str) -> str:
+    """`text` in the quotation marks of the language: „…“ in German, “…” in English."""
+    return f"„{text}“" if language == "de" else f"“{text}”"
+
+
 def t(key: str, language: str | None = None) -> str:
     lang = resolve_language(language)
     if key in CATALOG.get(lang, {}):

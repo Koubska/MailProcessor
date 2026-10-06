@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from mailprocessor.excel_writer import FIXED_DATA_COLUMNS, PROFILE_COLUMN
+from mailprocessor.columns import FIXED_DATA_COLUMNS, PROFILE_COLUMN
 from mailprocessor.rule_patterns import LABEL_TYPES, RuleType, build_pattern
 
 
