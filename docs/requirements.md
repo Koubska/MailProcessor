@@ -75,7 +75,7 @@ A source yields one item per message: either a `NormalizedMail`, or a `MailReadE
 
 ### 5.1 `.eml` folder
 
-* Reads all files matching a glob (default `*.eml`) in one folder, in sorted order. Files are only opened for reading.
+* Reads all files matching a glob (default `*.eml`) in one folder, ignoring case (`Anfrage.EML` counts on every platform, as it does on Windows), sorted by name ignoring case. Files are only opened for reading.
 * A missing folder is an error, not an empty result.
 * The workbook and the ledger must not be located inside the mail folder.
 

@@ -122,3 +122,10 @@ def test_profile_summary_when_no_profile_fits() -> None:
         "✗ Passt zu keinem Profil. Am ähnlichsten ist „Abmeldung“, dort fehlt „Grund“ – "
         "diese Mail käme ins Blatt „fehler“."
     )
+
+
+def test_sample_files_ignore_case_of_the_extension(tmp_path: Path) -> None:
+    for name in ("a.eml", "B.EML"):
+        (tmp_path / name).write_text("x", encoding="utf-8")
+
+    assert [path.name for path in sample_files(tmp_path)] == ["a.eml", "B.EML"]

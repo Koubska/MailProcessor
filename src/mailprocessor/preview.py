@@ -14,6 +14,7 @@ from mailprocessor.config import FieldRule, ParsingRules
 from mailprocessor.i18n import t
 from mailprocessor.parser import ParseResult, extract_field, normalize_body, parse_mail
 from mailprocessor.sources.email_content import parse_message_bytes
+from mailprocessor.sources.eml_folder_source import matching_files
 
 
 @dataclass(frozen=True)
@@ -48,7 +49,7 @@ def sample_files(folder: Path, glob_pattern: str = "*.eml") -> list[Path]:
     """The mails a user can step through; empty if the folder does not exist."""
     if not folder.is_dir():
         return []
-    return [path for path in sorted(folder.glob(glob_pattern)) if path.is_file()]
+    return matching_files(folder, glob_pattern)
 
 
 def preview_rule(rule: FieldRule, sample: SampleMail) -> RulePreview:
