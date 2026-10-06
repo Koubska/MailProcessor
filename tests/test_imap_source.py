@@ -239,6 +239,8 @@ def test_failed_fetch_yields_error_and_continues() -> None:
     assert isinstance(items[0], MailReadError)
     assert items[0].message_identity == "uid:101"
     assert items[1].message_identity == "<ok@example.com>"
+    # So the error row of uid 202 from an earlier failed fetch can be removed once it is read.
+    assert items[1].read_error_identity == "uid:202"
 
 
 def test_login_failure_is_os_error_without_password() -> None:

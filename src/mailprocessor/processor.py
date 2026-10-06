@@ -252,6 +252,10 @@ def run_pipeline(
                 logger.info("Stopped by the user; saving what was processed so far")
                 break
             is_mail = isinstance(item, NormalizedMail)
+            if is_mail and item.read_error_identity and not dry_run:
+                # It was read this time, so an earlier "could not be read" row (e.g. a file still being copied,
+                # a failed IMAP fetch) is resolved, whatever happens to the mail now.
+                excel.remove_errors_for(error_key(item.source_type, item.source_location, item.read_error_identity))
             # Checked before the ledger, so changing the filter later picks these mails up.
             if is_mail and not app_cfg.filter.matches(subject=item.subject, sender=item.from_raw):
                 logger.debug("Left out %s: subject or sender does not match the filter", item.display_name)
