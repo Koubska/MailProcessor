@@ -858,6 +858,8 @@ def test_error_row_of_an_unreadable_file_goes_once_the_file_is_read(tmp_path: Pa
 
     assert run_pipeline(config, _build_rules()).processed == 1
     assert _error_rows(tmp_path) == []
+
+
 def test_overlapping_runs_never_lose_rows(tmp_path: Path, monkeypatch) -> None:
     # Run B has loaded the workbook and waits for its mail source (e.g. a slow IMAP login) while run A
     # (a second window, or a scheduled CLI run) exports the mail. B must not save its older copy over A's rows.
@@ -895,3 +897,21 @@ def test_overlapping_runs_never_lose_rows(tmp_path: Path, monkeypatch) -> None:
     # The run that started second is refused with a clear message instead of racing the first.
     assert isinstance(outcomes["A"], RunInProgressError)
     assert isinstance(outcomes["B"], RunSummary) and outcomes["B"].processed == 1
+
+
+def test_moving_the_mail_folder_keeps_one_error_row_per_mail(tmp_path: Path) -> None:
+    # The ledger ignores the folder's location (moving it must not export again); the error sheet must
+    # likewise keep one row per failing mail instead of adding a second one for the new location.
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    _write_eml(inbox / "no-phone.eml", GOOD_BODY[:-1], "no-phone@example.com")
+    config = _build_config(tmp_path)
+    run_pipeline(config, _build_rules())
+
+    moved = inbox.rename(tmp_path / "moved")
+    assert config.source.eml is not None
+    config.source.eml.folder = str(moved)
+    run_pipeline(config, _build_rules())
+
+    rows = load_workbook(tmp_path / "out" / "mail_export.xlsx")["fehler"].iter_rows(min_row=2, values_only=True)
+    assert [row[0] for row in rows] == ["no-phone.eml"]

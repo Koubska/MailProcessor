@@ -8,7 +8,7 @@ removed or reordered without breaking an existing workbook. The workbook is in G
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -70,8 +70,20 @@ HEADER_FONT = Font(bold=True)
 
 
 def error_key(source_type: str, source_location: str, message_identity: str) -> str:
-    """Value of the hidden "Kennung" column: the same mail gets the same key in every run."""
-    return f"{source_type}|{source_location}|{message_identity}"
+    """Value of the hidden "Kennung" column: the same mail gets the same key in every run.
+
+    Like the ledger, the key leaves out where the mail is (`source_location`): after moving the mail folder
+    or renaming the mailbox, a mail that still fails keeps its one row instead of getting a second one.
+    """
+    return f"{source_type}|{message_identity}"
+
+
+def _same_mail(stored: object, key: str) -> bool:
+    """Whether a "Kennung" cell belongs to the mail with this key, also in the older "type|location|identity" form."""
+    if not isinstance(stored, str):
+        return False
+    source_type, _, identity = key.partition("|")
+    return stored == key or (stored.startswith(f"{source_type}|") and stored.endswith(f"|{identity}"))
 
 
 @dataclass(frozen=True)
@@ -136,10 +148,10 @@ class _Sheet:
             elif isinstance(cell.value, datetime):
                 cell.number_format = DATE_FORMAT
 
-    def delete_rows_where(self, column: str, value: str) -> None:
+    def delete_rows_where(self, column: str, matches: Callable[[object], bool]) -> None:
         index = self.columns[column]
         for row_index in range(self.sheet.max_row, 1, -1):
-            if self.sheet.cell(row=row_index, column=index).value == value:
+            if matches(self.sheet.cell(row=row_index, column=index).value):
                 self.sheet.delete_rows(row_index)
 
     def letter(self, column: str) -> str:
@@ -264,7 +276,7 @@ class ExcelOutput:
         target.append({**values, RECEIVED_COLUMN: received, TRANSFERRED_COLUMN: self.now, CONTENT_COLUMN: content})
 
     def remove_errors_for(self, key: str) -> None:
-        self.errors.delete_rows_where(KEY_COLUMN, key)
+        self.errors.delete_rows_where(KEY_COLUMN, lambda stored: _same_mail(stored, key))
 
     def upsert_error(self, entry: ErrorEntry) -> None:
         """Keep exactly one error row per mail, so retried failures don't pile up."""
