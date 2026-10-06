@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import imaplib
 import logging
+import re
 import ssl
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
@@ -48,7 +50,7 @@ class ReadOnlyImapClient:
 
         Returns the number of messages the server reports for the mailbox, if it is readable.
         """
-        status, data = self._client.select(mailbox, readonly=True)
+        status, data = self._client.select(mailbox_argument(mailbox), readonly=True)
         if status != "OK":
             raise OSError(f"Failed to open mailbox in readonly mode: {mailbox}")
         _code, confirmation = self._client.response("READ-ONLY")
@@ -109,6 +111,41 @@ def _build_since_date_token(max_age_days: int, now_utc: datetime) -> str:
 def _quote_imap_string(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
+
+
+# A name that is already in IMAP's modified UTF-7 (as some mail programs show it, e.g. "Entw&APw-rfe").
+_MODIFIED_UTF7 = re.compile(r"(?:[\x20-\x25\x27-\x7e]|&[A-Za-z0-9+,]*-)*")
+
+
+def _encode_modified_utf7(name: str) -> str:
+    """RFC 3501 section 5.1.3: printable ASCII stays, "&" becomes "&-", the rest is base64 of UTF-16."""
+    encoded: list[str] = []
+    pending: list[str] = []
+
+    def flush() -> None:
+        if pending:
+            data = base64.b64encode("".join(pending).encode("utf-16-be")).decode("ascii")
+            encoded.append("&" + data.rstrip("=").replace("/", ",") + "-")
+            pending.clear()
+
+    for char in name:
+        if "\x20" <= char <= "\x7e":
+            flush()
+            encoded.append("&-" if char == "&" else char)
+        else:
+            pending.append(char)
+    flush()
+    return "".join(encoded)
+
+
+def mailbox_argument(mailbox: str) -> str:
+    """The mailbox name as imaplib must send it: modified UTF-7, quoted (imaplib does neither itself).
+
+    Without this, names with spaces ("Sent Items") are rejected and names with umlauts fail before sending.
+    """
+    if not _MODIFIED_UTF7.fullmatch(mailbox):
+        mailbox = _encode_modified_utf7(mailbox)
+    return _quote_imap_string(mailbox)
 
 
 def _any_of(key: str, entries: list[str]) -> list[str]:

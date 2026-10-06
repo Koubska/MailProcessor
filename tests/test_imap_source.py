@@ -14,6 +14,7 @@ from mailprocessor.sources.imap_source import (
     check_imap_connection,
     default_client_factory,
     iter_imap_messages,
+    mailbox_argument,
 )
 
 
@@ -370,3 +371,33 @@ def test_check_imap_connection_reports_login_failure_and_logs_out() -> None:
     with pytest.raises(OSError, match="login failed"):
         check_imap_connection(_cfg(), client_factory=lambda _host, _port: fake_client)
     assert fake_client.logout_called
+
+
+@pytest.mark.parametrize(
+    ("mailbox", "argument"),
+    [
+        ("INBOX", '"INBOX"'),
+        ("Sent Items", '"Sent Items"'),
+        ("Anfragen/Schüler", '"Anfragen/Sch&APw-ler"'),
+        ("Entwürfe", '"Entw&APw-rfe"'),
+        ("A & B", '"A &- B"'),
+        ("日本語", '"&ZeVnLIqe-"'),  # RFC 3501's example
+        ("Entw&APw-rfe", '"Entw&APw-rfe"'),  # already encoded, e.g. copied from another mail program
+        ('Say "hi"', '"Say \\"hi\\""'),
+    ],
+)
+def test_mailbox_argument_is_quoted_modified_utf7(mailbox: str, argument: str) -> None:
+    assert mailbox_argument(mailbox) == argument
+
+
+def test_examine_sends_the_encoded_mailbox_name() -> None:
+    selected: list[str] = []
+
+    class RecordingClient(FakeImapClient):
+        def select(self, mailbox: str, readonly: bool = False):
+            selected.append(mailbox)
+            return super().select(mailbox, readonly=readonly)
+
+    ReadOnlyImapClient(RecordingClient()).examine("Anfragen Schüler")
+
+    assert selected == ['"Anfragen Sch&APw-ler"']

@@ -83,6 +83,7 @@ A source yields one item per message: either a `NormalizedMail`, or a `MailReadE
 
 * Strictly read-only. Allowed commands: `STARTTLS`, `LOGIN`, `EXAMINE`, `UID SEARCH`, `UID FETCH ... (BODY.PEEK[])`, `LOGOUT`. No `STORE`, `COPY`, `MOVE`, `EXPUNGE`, `CLOSE`, append or delete.
 * The server must confirm `[READ-ONLY]` for the mailbox; otherwise the run aborts before any message is fetched.
+* The mailbox name is sent quoted and in IMAP's modified UTF-7, so names with spaces or umlauts (`Sent Items`, `Anfragen/Schüler`) work; a name that is already in modified UTF-7 (`Entw&APw-rfe`) is sent unchanged.
 * Fetches use `BODY.PEEK[]` so the `\Seen` flag is never set, even on servers that ignore read-only mode.
 * All server access goes through an allow-list wrapper (`ReadOnlyImapClient`) that exposes no mutating commands.
 * The subject and sender filters (`FROM`, `SUBJECT`, ASCII entries only) and the age filter (`SINCE`) are passed to the server, so other mails are not downloaded.
