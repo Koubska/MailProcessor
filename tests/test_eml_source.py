@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+from mailprocessor.models import NormalizedMail
 from mailprocessor.sources.eml_folder_source import iter_eml_messages, parse_eml_file
 
 
@@ -122,3 +125,17 @@ def test_file_pattern_ignores_case_on_every_platform(tmp_path: Path) -> None:
         (tmp_path / name).write_bytes(b"Subject: x\r\n\r\nBody\r\n")
 
     assert [message.origin for message in iter_eml_messages(tmp_path)] == ["a.eml", "B.EML", "c.Eml"]
+
+
+@pytest.mark.parametrize("charset", ["quoted-printable", "base64", "hex", "rot13", "idna", "undefined"])
+def test_charset_naming_a_non_text_codec_falls_back_to_utf8(tmp_path: Path, charset: str) -> None:
+    # codecs.lookup knows these names, but they cannot decode mail text; e.g. "quoted-printable" is a
+    # transfer encoding some broken mailers put into the charset. The mail must still be read.
+    (tmp_path / "m.eml").write_bytes(
+        f'Subject: x\r\nContent-Type: text/plain; charset="{charset}"\r\n\r\nName: Jörg\r\n'.encode()
+    )
+
+    [message] = iter_eml_messages(tmp_path)
+
+    assert isinstance(message, NormalizedMail)
+    assert message.body_text == "Name: Jörg"
