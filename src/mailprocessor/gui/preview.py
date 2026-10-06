@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mailprocessor.config import FieldRule, ParsingRules
-from mailprocessor.i18n import t
+from mailprocessor.i18n import quote, t
 from mailprocessor.parser import ParseResult, extract_field, normalize_body, parse_mail
 from mailprocessor.sources.email_content import parse_message_bytes
 from mailprocessor.sources.eml_folder_source import matching_files
@@ -67,8 +67,7 @@ def preview_rule(rule: FieldRule, sample: SampleMail) -> RulePreview:
 
 
 def _quoted_list(columns: list[str], lang: str) -> str:
-    quote = ("„", "“") if lang == "de" else ("“", "”")
-    return ", ".join(f"{quote[0]}{column}{quote[1]}" for column in columns)
+    return ", ".join(quote(column, lang) for column in columns)
 
 
 def summary_text(rules: list[FieldRule], previews: list[RulePreview], error_sheet: str, lang: str) -> str:
@@ -91,8 +90,7 @@ def best_profile(rules: ParsingRules, sample: SampleMail) -> ParseResult:
 
 def profile_summary_text(best: ParseResult, error_sheet: str, lang: str) -> str:
     """With several profiles: which one the sample mail fits, or which one comes closest and what it misses."""
-    quote = ("„", "“") if lang == "de" else ("“", "”")
-    profile = f"{quote[0]}{best.profile}{quote[1]}"
+    profile = quote(best.profile, lang)
     if best.missing_required:
         return t("preview.summary.no_profile", lang).format(
             profile=profile, columns=_quoted_list(best.missing_required, lang), sheet=error_sheet

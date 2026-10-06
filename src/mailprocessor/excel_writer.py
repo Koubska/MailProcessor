@@ -20,15 +20,8 @@ from openpyxl.styles import Font
 from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
+from mailprocessor.columns import CONTENT_COLUMN, FIXED_DATA_COLUMNS, RECEIVED_COLUMN, TRANSFERRED_COLUMN
 from mailprocessor.errors import SheetHeaderError, WorkbookLockedError, WorkbookUnreadableError
-
-# Columns of the data sheet that the app fills itself, after the field columns (reserved names for fields).
-RECEIVED_COLUMN = "Eingegangen am"  # the mail's Date header
-TRANSFERRED_COLUMN = "Übertragen am"  # when the run added the row
-CONTENT_COLUMN = "E-Mail-Inhalt"  # the full mail text
-FIXED_DATA_COLUMNS = (RECEIVED_COLUMN, TRANSFERRED_COLUMN, CONTENT_COLUMN)
-# First column of the shared data sheet when there are several profiles: which profile the row was read with.
-PROFILE_COLUMN = "Profil"
 
 # The error sheet: one row per mail that currently fails. "Kennung" identifies the mail across runs; it is hidden.
 KEY_COLUMN = "Kennung"

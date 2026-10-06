@@ -2,7 +2,7 @@ from importlib import resources
 from pathlib import Path
 
 from mailprocessor.config import DEFAULT_FILES, FieldRule, ParsingRules, Profile, load_parsing_rules
-from mailprocessor.preview import (
+from mailprocessor.gui.preview import (
     RulePreview,
     SampleMail,
     best_profile,
@@ -14,7 +14,7 @@ from mailprocessor.preview import (
     summary_text,
 )
 
-EXAMPLE = Path(__file__).resolve().parents[1] / "docs" / "example.eml"
+EXAMPLE = Path(__file__).resolve().parents[2] / "docs" / "example.eml"
 
 
 def _default_rules() -> list[FieldRule]:

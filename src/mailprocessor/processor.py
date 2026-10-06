@@ -1,4 +1,4 @@
-"""Pipeline orchestration."""
+"""Pipeline orchestration: read the source, parse each mail, write the workbook, then commit the ledger."""
 
 from __future__ import annotations
 
@@ -6,100 +6,34 @@ import logging
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import closing
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from email.utils import parsedate_to_datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
+from mailprocessor.columns import PROFILE_COLUMN
 from mailprocessor.config import AppConfig, AppSection, ParsingRules
 from mailprocessor.errors import LedgerUnreadableError, MailFolderNotFoundError, WorkbookLockedError
 from mailprocessor.excel_writer import (
     INTERNAL_ERROR_REASON,
     MISSING_FIELDS_REASON,
-    PROFILE_COLUMN,
     UNREADABLE_REASON,
     ErrorEntry,
     ExcelOutput,
     error_key,
 )
 from mailprocessor.ledger import Ledger, LedgerKey, compute_content_hash
+from mailprocessor.mail_dates import is_within_max_age, local_time, mail_datetime
 from mailprocessor.models import MailReadError, NormalizedMail
 from mailprocessor.parser import ParseResult, parse_mail
+from mailprocessor.run_summary import MAX_PROBLEM_DETAILS, Problem, RunSummary
 from mailprocessor.sources.eml_folder_source import iter_eml_messages
 from mailprocessor.sources.imap_source import iter_imap_messages
+
+__all__ = ["Problem", "RunSummary", "data_sheets", "iter_source_messages", "run_pipeline", "start_over"]
 
 logger = logging.getLogger(__name__)
 
 # Called as progress(current, total) while a run reads messages; current counts from 1.
 ProgressCallback = Callable[[int, int], None]
-
-
-# Details are kept for at most this many failed messages per run (they hold the mail text in memory).
-MAX_PROBLEM_DETAILS = 500
-
-
-@dataclass(frozen=True)
-class Problem:
-    """A message that failed in this run, for the GUI's problem list. Never logged or written anywhere."""
-
-    name: str  # display name: file name or IMAP uid
-    reason: str
-    missing: tuple[str, ...] = ()
-    # The mail text and headers as parsed, so the GUI can show the mail; None if it could not be read.
-    body: str | None = None
-    header_text: str = ""
-    # The profile that came closest, if there are several; its fields are the missing ones.
-    profile: str = ""
-
-
-@dataclass(frozen=True)
-class RunSummary:
-    seen: int
-    processed: int
-    skipped: int
-    failed: int
-    # True if the run was stopped early; everything handled until then was saved.
-    cancelled: bool = False
-    # Mails left out because subject or sender did not match the filter; not counted in `seen`.
-    filtered: int = 0
-    problems: tuple[Problem, ...] = ()
-    # New rows per profile, in the order of the profiles; empty if there is only one profile.
-    per_profile: tuple[tuple[str, int], ...] = ()
-
-
-def _mail_datetime(date_raw: str) -> datetime | None:
-    """The mail's Date header, or None if it is missing, unreadable or cannot be converted to UTC and local time."""
-    try:
-        moment = parsedate_to_datetime(date_raw)
-        if moment.tzinfo is not None:
-            # Fails at the edge of the calendar (e.g. the year 10000 in UTC) and, on Windows, can fail before 1970.
-            # Checked here, so one such mail cannot abort the run when its age or local time is needed.
-            moment.astimezone(UTC)
-            moment.astimezone()
-        return moment
-    except (TypeError, ValueError, OverflowError, OSError):
-        return None
-
-
-def _local_time(moment: datetime | None) -> datetime | None:
-    """As people read it in Excel: local time without a time zone (Excel cells have none)."""
-    if moment is None or moment.tzinfo is None:
-        return moment
-    return moment.astimezone().replace(tzinfo=None)
-
-
-def _is_within_max_age(message: NormalizedMail, max_age_days: int, now_utc: datetime) -> bool:
-    if max_age_days <= 0:
-        return True
-    message_datetime = _mail_datetime(message.date_raw)
-    if message_datetime is None:
-        # Without a usable Date header the age is unknown; process it rather than drop it silently.
-        logger.warning("Message %s has no valid Date header; ignoring max_age_days for it", message.message_identity)
-        return True
-    if message_datetime.tzinfo is None:
-        message_datetime = message_datetime.replace(tzinfo=UTC)
-    oldest_allowed = now_utc - timedelta(days=max_age_days)
-    return message_datetime.astimezone(UTC) >= oldest_allowed
 
 
 def iter_source_messages(
@@ -138,7 +72,7 @@ def iter_source_messages(
     eml = app_cfg.source.eml
     for message in iter_eml_messages(Path(eml.folder), glob_pattern=eml.glob, on_total=set_total):
         advance()
-        if isinstance(message, MailReadError) or _is_within_max_age(message, max_age_days, effective_now_utc):
+        if isinstance(message, MailReadError) or is_within_max_age(message, max_age_days, effective_now_utc):
             yield message
 
 
@@ -211,6 +145,140 @@ def _check_eml_folder(app_cfg: AppConfig) -> None:
             raise ValueError(f"{setting} must not be inside the mail folder {eml_folder}")
 
 
+class _Run:
+    """The state of one run: the open ledger and workbook, the counters and the problems found so far."""
+
+    def __init__(self, app_cfg: AppConfig, rules: ParsingRules, ledger: Ledger, excel: ExcelOutput) -> None:
+        self.app = app_cfg.app
+        self.filter = app_cfg.filter
+        self.rules = rules
+        self.ledger = ledger
+        self.excel = excel
+        self.dry_run = app_cfg.app.dry_run
+        self.several_profiles = len(rules.profiles) > 1
+        self.rows_per_profile = dict.fromkeys((profile.name for profile in rules.profiles), 0)
+        self.seen = self.processed = self.skipped = self.failed = self.filtered = 0
+        self.problems: list[Problem] = []
+
+    def handle(self, item: NormalizedMail | MailReadError) -> bool:
+        """Process one message. Returns False when the run must stop (`max_messages` new messages handled)."""
+        is_mail = isinstance(item, NormalizedMail)
+        if is_mail and item.read_error_identity and not self.dry_run:
+            # It was read this time, so an earlier "could not be read" row (e.g. a file still being copied,
+            # a failed IMAP fetch) is resolved, whatever happens to the mail now.
+            self.excel.remove_errors_for(error_key(item.source_type, item.source_location, item.read_error_identity))
+        # Checked before the ledger, so changing the filter later picks these mails up.
+        if is_mail and not self.filter.matches(subject=item.subject, sender=item.from_raw):
+            logger.debug("Left out %s: subject or sender does not match the filter", item.display_name)
+            self.filtered += 1
+            if not self.dry_run:
+                # It may have failed before the filter was set; it is no longer a problem.
+                self.excel.remove_errors_for(error_key(item.source_type, item.source_location, item.message_identity))
+            return True
+        key = LedgerKey(
+            source_type=item.source_type,
+            source_location=item.source_location,
+            message_identity=item.message_identity,
+            content_hash=compute_content_hash(item.body_text) if is_mail else "",
+        )
+        if is_mail and self.ledger.is_already_processed(key):
+            logger.debug("Skipped %s: already processed in an earlier run", item.display_name)
+            self.seen += 1
+            self.skipped += 1
+            return True
+        max_messages = self.app.max_messages
+        if max_messages > 0 and self.processed + self.failed >= max_messages:
+            logger.info("Stopping: reached max_messages (%d new messages per run)", max_messages)
+            return False
+        self.seen += 1
+
+        result = _safe_parse(item, self.rules) if is_mail else ParseResult({}, [], item.reason)
+        received = local_time(mail_datetime(item.date_raw)) if is_mail else None
+        if is_mail:
+            # Column names only; extracted values are confidential and never logged.
+            logger.debug(
+                "%s: found %s; missing %s%s",
+                item.display_name,
+                ", ".join(result.values) or "nothing",
+                ", ".join(result.missing_required) or "nothing",
+                f" (best profile: {result.profile})" if self.several_profiles else "",
+            )
+        if result.error_reason is None:
+            self._record_success(item, key, result, received)
+        else:
+            self._record_failure(item, key, result, received)
+        return True
+
+    def _record_success(
+        self, item: NormalizedMail, key: LedgerKey, result: ParseResult, received: datetime | None
+    ) -> None:
+        self.processed += 1
+        self.rows_per_profile[result.profile] += 1
+        if self.several_profiles:
+            logger.info("Processed %s with profile %s", item.display_name, result.profile)
+        else:
+            logger.info("Processed %s", item.display_name)
+        if self.dry_run:
+            return
+        values = result.values
+        if self.app.profile_sheets == "per_profile":
+            sheet = result.profile
+        else:
+            sheet = self.app.sheet_data
+            if self.several_profiles:
+                values = {PROFILE_COLUMN: result.profile, **values}
+        self.excel.append_data(values, item.body_text, received=received, sheet=sheet)
+        self.excel.remove_errors_for(error_key(key.source_type, key.source_location, key.message_identity))
+        self.ledger.mark_processed(key)
+
+    def _record_failure(
+        self, item: NormalizedMail | MailReadError, key: LedgerKey, result: ParseResult, received: datetime | None
+    ) -> None:
+        is_mail = isinstance(item, NormalizedMail)
+        self.failed += 1
+        logger.warning("Failed %s: %s", item.display_name, result.error_reason)
+        if len(self.problems) < MAX_PROBLEM_DETAILS:
+            self.problems.append(
+                Problem(
+                    name=item.display_name,
+                    reason=result.error_reason or "",
+                    missing=tuple(result.missing_required),
+                    body=item.body_text if is_mail else None,
+                    header_text=item.header_text if is_mail else "",
+                    profile=result.profile if self.several_profiles and result.missing_required else "",
+                )
+            )
+        if not self.dry_run:
+            self.ledger.mark_failed(key, result.error_reason)
+            self.excel.upsert_error(_error_entry(item, result, received, self.several_profiles))
+
+    def summary(self, cancelled: bool) -> RunSummary:
+        return RunSummary(
+            seen=self.seen,
+            processed=self.processed,
+            skipped=self.skipped,
+            failed=self.failed,
+            cancelled=cancelled,
+            filtered=self.filtered,
+            problems=tuple(self.problems),
+            per_profile=tuple(self.rows_per_profile.items()) if self.several_profiles else (),
+        )
+
+
+def _open_output(app_cfg: AppConfig, sheets: dict[str, list[str]], ledger: Ledger) -> ExcelOutput:
+    excel = ExcelOutput(Path(app_cfg.app.output_xlsx), sheets, app_cfg.app.sheet_errors)
+    if not app_cfg.app.dry_run:
+        excel.check_writable()
+    if excel.is_new and ledger.count_processed():
+        logger.warning(
+            "%s is new but the ledger already lists processed messages; those are not exported again. "
+            "Delete the ledger file (%s) to re-export everything.",
+            excel.path,
+            app_cfg.app.sqlite_path,
+        )
+    return excel
+
+
 def run_pipeline(
     app_cfg: AppConfig,
     rules: ParsingRules,
@@ -227,16 +295,8 @@ def run_pipeline(
     dry_note = " (dry run: nothing is written)" if dry_run else ""
     logger.info("Run started: reading from %s%s", _describe_source(app_cfg), dry_note)
     _check_eml_folder(app_cfg)
-
     sheets = data_sheets(app_cfg.app, rules)
-    several_profiles = len(rules.profiles) > 1
-    per_profile_sheets = app_cfg.app.profile_sheets == "per_profile"
-    rows_per_profile = dict.fromkeys((profile.name for profile in rules.profiles), 0)
-
-    seen = processed = skipped = failed = filtered = 0
-    problems: list[Problem] = []
     cancelled = False
-    max_messages = app_cfg.app.max_messages
 
     with (
         # Opened first: a writing run holds the ledger's lock from here on, so a second run (another window,
@@ -244,129 +304,35 @@ def run_pipeline(
         Ledger(Path(app_cfg.app.sqlite_path), read_only=dry_run) as ledger,
         closing(iter_source_messages(app_cfg, progress=progress)) as messages,
     ):
-        excel = ExcelOutput(Path(app_cfg.app.output_xlsx), sheets, app_cfg.app.sheet_errors)
-        if not dry_run:
-            excel.check_writable()
-        if excel.is_new and ledger.count_processed():
-            logger.warning(
-                "%s is new but the ledger already lists processed messages; those are not exported again. "
-                "Delete the ledger file (%s) to re-export everything.",
-                excel.path,
-                app_cfg.app.sqlite_path,
-            )
-
+        excel = _open_output(app_cfg, sheets, ledger)
+        run = _Run(app_cfg, rules, ledger, excel)
         for item in messages:
             if cancel is not None and cancel.is_set():
                 cancelled = True
                 logger.info("Stopped by the user; saving what was processed so far")
                 break
-            is_mail = isinstance(item, NormalizedMail)
-            if is_mail and item.read_error_identity and not dry_run:
-                # It was read this time, so an earlier "could not be read" row (e.g. a file still being copied,
-                # a failed IMAP fetch) is resolved, whatever happens to the mail now.
-                excel.remove_errors_for(error_key(item.source_type, item.source_location, item.read_error_identity))
-            # Checked before the ledger, so changing the filter later picks these mails up.
-            if is_mail and not app_cfg.filter.matches(subject=item.subject, sender=item.from_raw):
-                logger.debug("Left out %s: subject or sender does not match the filter", item.display_name)
-                filtered += 1
-                if not dry_run:
-                    # It may have failed before the filter was set; it is no longer a problem.
-                    excel.remove_errors_for(error_key(item.source_type, item.source_location, item.message_identity))
-                continue
-            key = LedgerKey(
-                source_type=item.source_type,
-                source_location=item.source_location,
-                message_identity=item.message_identity,
-                content_hash=compute_content_hash(item.body_text) if is_mail else "",
-            )
-            if is_mail and ledger.is_already_processed(key):
-                logger.debug("Skipped %s: already processed in an earlier run", item.display_name)
-                seen += 1
-                skipped += 1
-                continue
-            if max_messages > 0 and processed + failed >= max_messages:
-                logger.info("Stopping: reached max_messages (%d new messages per run)", max_messages)
+            if not run.handle(item):
                 break
-            seen += 1
-
-            result = _safe_parse(item, rules) if is_mail else ParseResult({}, [], item.reason)
-            received = _local_time(_mail_datetime(item.date_raw)) if is_mail else None
-            sheet_key = error_key(key.source_type, key.source_location, key.message_identity)
-            if is_mail:
-                # Column names only; extracted values are confidential and never logged.
-                logger.debug(
-                    "%s: found %s; missing %s%s",
-                    item.display_name,
-                    ", ".join(result.values) or "nothing",
-                    ", ".join(result.missing_required) or "nothing",
-                    f" (best profile: {result.profile})" if several_profiles else "",
-                )
-            if result.error_reason is None:
-                processed += 1
-                rows_per_profile[result.profile] += 1
-                if several_profiles:
-                    logger.info("Processed %s with profile %s", item.display_name, result.profile)
-                else:
-                    logger.info("Processed %s", item.display_name)
-                if not dry_run:
-                    values = result.values
-                    if per_profile_sheets:
-                        sheet = result.profile
-                    else:
-                        sheet = app_cfg.app.sheet_data
-                        if several_profiles:
-                            values = {PROFILE_COLUMN: result.profile, **values}
-                    excel.append_data(values, item.body_text, received=received, sheet=sheet)
-                    excel.remove_errors_for(sheet_key)
-                    ledger.mark_processed(key)
-                continue
-
-            failed += 1
-            logger.warning("Failed %s: %s", item.display_name, result.error_reason)
-            if len(problems) < MAX_PROBLEM_DETAILS:
-                problems.append(
-                    Problem(
-                        name=item.display_name,
-                        reason=result.error_reason or "",
-                        missing=tuple(result.missing_required),
-                        body=item.body_text if is_mail else None,
-                        header_text=item.header_text if is_mail else "",
-                        profile=result.profile if several_profiles and result.missing_required else "",
-                    )
-                )
-            if not dry_run:
-                ledger.mark_failed(key, result.error_reason)
-                excel.upsert_error(_error_entry(item, result, received, several_profiles))
 
         if not dry_run:
             # Save the workbook first; the ledger only records messages whose rows are on disk.
             excel.save()
             ledger.commit()
-            logger.info("Saved %s (%d new row(s), %d error(s))", excel.path, processed, failed)
+            logger.info("Saved %s (%d new row(s), %d error(s))", excel.path, run.processed, run.failed)
         else:
             logger.info("Dry run: %s and the ledger were not changed", excel.path)
 
     logger.info(
         "Run finished: seen=%d processed=%d skipped=%d failed=%d filtered=%d",
-        seen,
-        processed,
-        skipped,
-        failed,
-        filtered,
+        run.seen,
+        run.processed,
+        run.skipped,
+        run.failed,
+        run.filtered,
     )
-    if failed:
-        logger.warning("%d message(s) failed; details are in the '%s' sheet", failed, app_cfg.app.sheet_errors)
-
-    return RunSummary(
-        seen=seen,
-        processed=processed,
-        skipped=skipped,
-        failed=failed,
-        cancelled=cancelled,
-        filtered=filtered,
-        problems=tuple(problems),
-        per_profile=tuple(rows_per_profile.items()) if several_profiles else (),
-    )
+    if run.failed:
+        logger.warning("%d message(s) failed; details are in the '%s' sheet", run.failed, app_cfg.app.sheet_errors)
+    return run.summary(cancelled)
 
 
 def start_over(app_cfg: AppConfig, now: datetime | None = None) -> Path | None:
