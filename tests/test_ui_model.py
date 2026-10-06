@@ -53,6 +53,10 @@ def test_form_keeps_the_profile_sheets_choice() -> None:
         ({"sheet_errors": "daten"}, "sheet_errors", "verschiedene Namen"),
         ({"source_type": "imap", "imap_host": ""}, "imap_host", "E-Mail-Server"),
         ({"source_type": "imap", "imap_port": "99999"}, "imap_port", "Portnummer"),
+        # "²" and "³" (AltGr+2/3 on German keyboards) count as digits for str.isdigit, but int() rejects them.
+        ({"max_age_days": "3²"}, "max_age_days", "ganze Zahl"),
+        ({"max_messages": "¹"}, "max_messages", "ganze Zahl"),
+        ({"source_type": "imap", "imap_port": "99³"}, "imap_port", "Portnummer"),
     ],
 )
 def test_invalid_inputs_are_reported_per_field(changes: dict, key: str, message: str) -> None:
