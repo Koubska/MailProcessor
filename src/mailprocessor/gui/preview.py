@@ -21,7 +21,7 @@ from mailprocessor.sources.eml_folder_source import matching_files
 class SampleMail:
     title: str  # file name or a note such as "pasted text"
     body: str  # shown and editable in the GUI
-    header_text: str = ""  # searched as a fallback, like in a run
+    header_text: str = ""  # shown read-only above the body and searched as a fallback, like in a run
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,8 @@ class RulePreview:
     value: str | None
     # Position of the value in the body text, or None if it was found in a header (or not at all).
     span: tuple[int, int] | None = None
+    # Position of the value in the header text, if it was found there and not in the body.
+    header_span: tuple[int, int] | None = None
 
     @property
     def found(self) -> bool:
@@ -57,13 +59,21 @@ def preview_rule(rule: FieldRule, sample: SampleMail) -> RulePreview:
     value = extract_field(rule.regex, normalize_body(text))
     if value is None:
         return RulePreview(value=None)
-    match = re.search(rule.regex, sample.body)
+    span = _value_span(rule.regex, sample.body)
+    if span is not None:
+        return RulePreview(value=value, span=span)
+    return RulePreview(value=value, header_span=_value_span(rule.regex, sample.header_text))
+
+
+def _value_span(regex: str, text: str) -> tuple[int, int] | None:
+    """Where the rule's value is in `text`, for highlighting; None if the rule does not match there."""
+    match = re.search(regex, text)
     if match is None:
-        return RulePreview(value=value)
+        return None
     group = 1 if match.re.groups else 0
     if match.group(group) is None:
-        return RulePreview(value=value)
-    return RulePreview(value=value, span=match.span(group))
+        return None
+    return match.span(group)
 
 
 def _quoted_list(columns: list[str], lang: str) -> str:
