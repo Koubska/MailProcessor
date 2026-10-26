@@ -27,7 +27,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.0 # only exact version tags exist for this action
+      - uses: astral-sh/setup-uv@v10.3.2 # only exact version tags exist for this action
         with:
           python-version: "3.12"
           enable-cache: true
@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.0 # only exact version tags exist for this action
+      - uses: astral-sh/setup-uv@v10.3.2 # only exact version tags exist for this action
         with:
           python-version: "3.12"
           enable-cache: true
@@ -78,7 +78,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.0 # only exact version tags exist for this action
+      - uses: astral-sh/setup-uv@v10.3.2 # only exact version tags exist for this action
         with:
           python-version: "3.12"
           enable-cache: true
